@@ -1,7 +1,8 @@
 # Airgap
 
 A static, fully client-side image format converter that tells you exactly what
-a conversion throws away before you click Convert.
+a conversion throws away before you click Convert, then measures what it
+actually threw away afterwards.
 
 **Conversion happens entirely in your browser. Image bytes are never
 transmitted anywhere.** There is no server side, no upload, no analytics, no
@@ -9,98 +10,208 @@ telemetry, and no remote assets at runtime. (The machine running it is not
 "air-gapped"; the name refers to the app's own behaviour: it never connects to
 anything.)
 
-Phase 1 converts a single PNG, JPEG or WebP file into PNG, JPEG, lossless WebP
-or lossy WebP, using the browser's canvas encoder.
+Formats: PNG, JPEG, WebP, AVIF, JPEG XL and TIFF in; PNG, JPEG, WebP, AVIF,
+JPEG XL and TIFF out. HEIC is deliberately absent (see below).
 
 ## Why this exists
 
-Most converters silently destroy data. Re-encoding through a browser canvas
-strips EXIF (including GPS location), strips the ICC colour profile, truncates
-16-bit samples to 8-bit, and composites transparency onto black when the target
-cannot store alpha. Airgap does the same conversions, but it:
+Most converters silently destroy data. Airgap:
 
-- lists every loss **before** conversion, in a warning panel, split into
-  `pixels` (visible pixel values change), `hidden` (only RGB under alpha 0
-  changes) and `metadata` (EXIF, ICC);
-- offers a **Lossless only** toggle that disables any target which cannot keep
-  all visible pixel values of *this* source;
+- lists every loss **before** conversion in a warning panel, split into
+  `pixels` (visible pixel values change, or cannot be shown not to) and
+  `metadata` (EXIF, XMP, ICC dropped or altered);
+- offers a **Lossless only** toggle that disables any target whose *verified*
+  codec cannot keep all visible pixel values of *this* source;
 - **refuses to composite RGBA onto black**: converting an image with alpha to
-  JPEG requires you to pick a flatten colour (default white) and says the alpha
-  channel will be lost;
-- **verifies after conversion** by decoding its own output and diffing it
-  against what it encoded, and reports the measured result (identical, or how
-  many pixels differ and by how much).
+  JPEG requires you to pick a flatten colour (default white);
+- lets you choose what happens to **EXIF/XMP** (strip all, strip GPS only,
+  preserve all) and, separately, to the **ICC profile** (strip, preserve,
+  convert to sRGB), and says for each what it does to appearance and to values;
+- **probes every codec in your browser before believing it**: a codec's
+  declared capabilities are a hypothesis; a 24x24 test image with opaque noise,
+  semi-transparent pixels and colour hidden under alpha 0 is encoded, decoded,
+  compared exactly and, where possible, cross-checked with the browser's own
+  decoder. Whatever cannot be demonstrated is reported as unavailable;
+- **verifies after conversion** by decoding its own output, diffing every
+  sample against what it encoded (transparent pixels included), and re-reading
+  the container to confirm which metadata is present.
 
 ## Verify the privacy claim yourself
 
-1. **DevTools.** Open the app, open the browser DevTools Network tab, then
-   load and convert an image. After the initial page load you will see no
-   requests at all: not to this site, not to anyone.
+1. **DevTools.** Open the app, open the Network tab, load and convert an image.
+   After the page and its worker have loaded, the only requests you can ever
+   see are lazy loads of the app's own codec chunks (`/airgap/assets/*.js`),
+   the first time a format is used. Nothing goes anywhere else, and no request
+   carries image data.
 2. **The CSP.** View the page source. The `Content-Security-Policy` meta tag
-   contains `connect-src 'none'` and `default-src 'none'`. That is the browser
-   itself refusing to let the page open any connection, regardless of what the
-   JavaScript tries to do. One subtlety matters for the worker that does the
-   actual conversion: a meta-tag CSP applies to the document, and a dedicated
-   worker started from a same-origin URL takes its policy from the worker
-   script's HTTP response headers instead, which GitHub Pages does not send.
-   Airgap therefore starts its worker from a `blob:` URL (`worker-src blob:`),
-   and a blob worker inherits the page's policy. This was verified in Chromium:
-   inside the blob worker, `fetch()` of both cross-origin and same-origin URLs
-   raises a `connect-src` violation and no request is made, while a worker
-   loaded from a plain URL under the same page was able to fetch. The e2e
-   suite asserts that every worker on the page runs on a `blob:` URL.
-3. **The automated test.** `npm run test:e2e` runs `tests/e2e/privacy.spec.ts`
-   against the production build. After the app is ready it routes every request
-   through a handler that records and aborts it, records every CSP violation
-   the document raises, runs three conversions, and asserts both lists are
-   empty. A `fetch()` blocked by CSP never becomes a request, which is why both
-   channels are watched. The test was verified to be able to fail: a temporary
-   `fetch('https://example.invalid/leak-test')` in `src/ui/app.ts` turned it red
-   through the CSP channel, and with `connect-src` relaxed it turned red through
-   the request channel. A positive-control test keeps that check in the suite.
+   contains `connect-src 'none'` and `default-src 'none'`: the browser itself
+   refuses to let the page open any connection. Two details matter:
+   - A meta-tag CSP applies to the document, and a dedicated worker started
+     from a same-origin URL takes its policy from HTTP response headers that
+     GitHub Pages does not send. Airgap therefore starts its worker from a
+     `blob:` URL (`worker-src blob:`), and a blob worker inherits the page's
+     policy. Verified in Chromium: inside the blob worker, `fetch()` of both
+     cross-origin and same-origin URLs raises a `connect-src` violation and no
+     request is made.
+   - `script-src` includes `'wasm-unsafe-eval'`. This keyword lets the browser
+     compile WebAssembly, which the image codecs are. It does **not** enable
+     JavaScript `eval()` or `new Function()` (that would be `'unsafe-eval'`,
+     which the policy does not contain and a test asserts it never will), and
+     it opens no network path. Because `connect-src 'none'` forbids fetching a
+     `.wasm` file even from our own origin, the wasm binaries are embedded as
+     base64 inside lazily imported script chunks.
+3. **The automated tests.** `npm run test:e2e` runs `tests/e2e/privacy.spec.ts`
+   against the production build. After the app is ready and the codecs a
+   conversion needs are loaded, it routes every request through a handler that
+   records and aborts it, records every CSP violation, runs four conversions,
+   and asserts both lists are empty. A `fetch()` blocked by CSP never becomes a
+   request, which is why both channels are watched. A second test pins down
+   lazy loading: while codecs load, every request must be a plain `GET` of a
+   file that exists by exact name in `dist/assets`. Positive controls prove
+   the trap catches a fetch, an image beacon, a WebSocket, and a fetch from
+   inside a worker. The suite was verified to be able to fail (and re-verified
+   for Phase 3): a temporary `fetch('https://example.invalid/leak-test')` in
+   the app turned it red through the CSP channel, and with `connect-src`
+   relaxed it turned red through the request channel.
 4. **Read the source.** `src/` contains no `fetch`, `XMLHttpRequest`,
-   `WebSocket`, `sendBeacon`, or `importScripts`. Everything is bundled by Vite
-   at build time. The only URLs the app creates are `blob:` URLs for previews
-   and the download link, which live in your browser's memory.
+   `WebSocket`, `sendBeacon` or `importScripts` of its own. The bundled codec
+   glue can reference its `.wasm` by URL, but it is always handed a compiled
+   module instead and the raw `.wasm` files are stripped from the build.
 
-## What the canvas codec loses (Phase 1 limitations)
+## What is provably lossless (Chromium, measured by the test suites)
 
-These are real and are surfaced in the UI. They are properties of the
-browser's canvas pipeline, which is the only codec in Phase 1.
+Exact means every sample of every pixel, R, G, B and A, including RGB stored
+under alpha 0, compared with a plain `===` after decoding the output again.
 
-| Loss | When | Severity |
+| Round trip | Exact? | Evidence |
 | --- | --- | --- |
-| Lossy encoding | target is JPEG or lossy WebP | pixels |
-| Bit depth 16 to 8 | source has >8-bit samples | pixels |
-| Alpha channel removed | source has alpha, target is JPEG | pixels (you choose the flatten colour) |
-| Semi-transparent RGB rounded | source has 0 < alpha < 255 | pixels |
-| RGB under alpha 0 discarded | source has fully transparent pixels | hidden |
-| Animation frames dropped | APNG or animated WebP | pixels |
-| EXIF stripped (GPS named if present) | source has EXIF | metadata |
-| ICC profile stripped | source has ICC | metadata |
+| PNG 8-bit RGBA to PNG, WebP lossless, AVIF lossless, TIFF | **yes** | codec round trips, pipeline verification, downloaded bytes re-read by pngjs / image-js |
+| PNG 16-bit RGBA to PNG, TIFF | **yes, at 16-bit** | pngjs and image-js read back identical Uint16 samples |
+| AVIF 10-bit and 12-bit RGBA to AVIF lossless | **yes** | codec round trips |
+| TIFF 8/16-bit (straight alpha) to PNG/WebP/AVIF/TIFF | **yes** | fixtures written by an independent writer, read by utif, verified by image-js |
+| WebP lossless, AVIF lossless sources to any lossless target | **yes** | fixture decodes match the generating pattern exactly |
+| JPEG XL, either direction | **no** | see below |
+| Anything through the canvas fallback with transparency | **no** | canvas is premultiplied: semi-transparent RGB rounds, RGB under alpha 0 is zeroed |
+| Any 16-bit source to WebP or JPEG XL | no, 8-bit output | flagged as `bit-depth` |
+| TIFF with associated (premultiplied) alpha | no | un-premultiplying rounds; flagged as `associated-alpha` |
 
-Two of these deserve emphasis because they surprised us during development
-and are measured by the tests:
+Round trips that are exact today are only ever *offered* as lossless after the
+probe has demonstrated them in the running browser.
 
-- **The 2D canvas stores premultiplied alpha.** A pixel `(200,100,50,1)` comes
-  back as `(255,0,0,1)`; a fully transparent pixel comes back as `(0,0,0,0)`.
-  So a PNG with partial transparency can *not* be round-tripped
-  pixel-identically through the canvas, even PNG to PNG. The alpha channel and
-  all fully opaque pixels survive exactly. With **Lossless only** on, a
-  semi-transparent source therefore has no available target in Phase 1, and
-  the UI says so rather than pretending.
-- **Lossless WebP is browser-dependent.** Chromium's canvas encoder produces a
-  true VP8L lossless bitstream when `quality` is exactly `1`. The app does not
-  assume this: on start-up the worker encodes a 32x32 noise image as WebP at
-  quality 1, decodes it, and only enables the "WebP (lossless)" target if the
-  result is pixel-identical. The e2e suite confirms a real VP8L round trip in
-  Chromium. In a browser where the probe fails, the target is disabled with the
-  reason shown, and the lossless-only toggle excludes it.
+### JPEG XL is decode and lossy-encode only
 
-Pixel values are copied as stored (`colorSpaceConversion: 'none'`); an ICC
-profile is dropped rather than applied, and the warning says colours may then
-be interpreted as sRGB. EXIF orientation is baked into the pixels so the output
-looks the same without the tag.
+The `@jsquash/jxl` encoder/decoder pair (a libjxl snapshot from January 2022,
+decoding through a float path) reproduces our alpha test image with a maximum
+channel difference of 1 on a handful of pixels, opaque ones included. That is
+not exact, so the probe refuses to mark it lossless and the "JPEG XL
+(lossless)" target is disabled with the reason shown. There is no independent
+JPEG XL decoder in the browser to attribute the error to one side, so
+JPEG XL *sources* also carry a `decoder-unverified` pixel loss: the output
+cannot be called lossless. If a future package fixes this, the probe will
+notice and the tests in `tests/browser/wasm-codecs.test.ts` that assert the
+current behaviour will fail, which is the intended signal.
+
+### RGB under alpha 0 is a pixel loss
+
+Fully transparent pixels still carry RGB. Sprite sheets and game textures put
+deliberate colour bleed under alpha-0 borders so that bilinear filtering does
+not pull fringing into visible edges; flattening those to `0,0,0,0` destroys
+real information even though no viewer shows it. Phase 1 classified this as a
+"hidden" loss that did not trip the lossless-only toggle. Phase 3 reclassifies
+it as a **pixels** loss: any pipeline that cannot keep it (the canvas fallback)
+is excluded by lossless-only, and the tests assert exact equality over the full
+RGBA tuple without skipping alpha-0 regions.
+
+## Metadata and colour
+
+**EXIF / XMP**, defaulting to strip all:
+
+- *Strip all*: EXIF and XMP removed.
+- *Strip GPS only*: the GPS IFD is removed from EXIF and nothing else is
+  touched (asserted on parsed tags by exifr, an independent reader). XMP is
+  removed too, because it can carry location and Airgap does not edit XMP
+  selectively.
+- *Preserve all*: EXIF and XMP carried through byte-for-byte, with **one
+  exception that the loss panel states**: Airgap stores pixels upright, so a
+  carried EXIF Orientation tag is rewritten to 1. Carrying the original tag
+  would make viewers rotate the already-rotated image again. Tested with an
+  Orientation=6 fixture.
+
+**ICC profile**, defaulting to strip:
+
+- *Strip*: pixel values preserved, appearance not (viewers assume sRGB).
+- *Preserve*: values and appearance preserved, if the target can embed a
+  profile.
+- *Convert to sRGB*: appearance preserved, values changed, profile dropped.
+  Only matrix/TRC profiles (sRGB, Display P3, Adobe RGB, ProPhoto and the
+  like) are converted. On a LUT-based profile the option is **disabled with
+  the reason shown**; Airgap never approximates a LUT with the matrix path.
+
+Which targets can carry what: PNG, JPEG, WebP and TIFF carry EXIF, ICC and
+XMP (verified by the probe: what goes in must come back out). AVIF and
+JPEG XL cannot carry any of them through the codecs in use; choosing
+"preserve" for those targets lists the loss and the post-conversion check
+reports "removed".
+
+The JPEG XL decoder applies the embedded ICC profile itself (to sRGB) and
+cannot be told not to; that conversion is reported as a pixel loss for JXL
+sources with a profile.
+
+## HEIC
+
+Left out of this phase. `libheif-js` can decode HEIC without cross-origin
+isolation, but the package ships no LICENSE file, so its LGPL-3 obligations
+cannot be met against absent terms, and HEVC decoding is patent-pool licensed.
+The decision and the evidence are in `docs/phase3-codec-survey.md`. It may
+return later as an explicit opt-in module.
+
+## Codec selection
+
+Every format has an ordered list of codecs; the first whose probe demonstrates
+the needed role wins, and the browser canvas is always registered last as the
+fallback (declaring `exactAlpha: false`, 8-bit, no EXIF orientation of its
+own). Selection and the loss computation read probed capability fields only;
+no codec is ever special-cased by name. If the preferred decoder rejects a
+particular file (mozjpeg refuses CMYK JPEGs, libwebp refuses animations), the
+next decoder is tried for that file and the source panel names the one used.
+
+| Format | Preferred codec | Fallback |
+| --- | --- | --- |
+| PNG | @jsquash/png (Rust `png`), 8/16-bit | canvas |
+| JPEG | @jsquash/jpeg (mozjpeg) | canvas |
+| WebP | @jsquash/webp (libwebp, `exact: 1`) | canvas |
+| AVIF | @jsquash/avif (libavif + aom), 8/10/12-bit | canvas (decode only) |
+| JPEG XL | @jsquash/jxl (libjxl snapshot), 8-bit | none |
+| TIFF | utif (decode) + own baseline writer, 8/16-bit | none |
+
+The TIFF writer is uncompressed baseline, little-endian, single strip, straight
+alpha declared as `ExtraSamples=2`, and is validated against two independent
+readers (utif and image-js `tiff`), never only against its matching reader.
+Fixture TIFFs come from a third, independent writer in the fixture script.
+
+Known limitation: AVIF `irot`/`imir` rotation properties are detected and
+reported as a pixel loss but not applied by the decoder in use.
+
+## Bundle size
+
+Measured with `node scripts/bundle-report.mjs` after `npm run build`
+(gzip -9). Before Phase 3, first paint was 8.4 KB plus a 3.8 KB worker.
+
+| Payload | gzipped |
+| --- | --- |
+| First paint (HTML + CSS + main JS, includes the inline bootstrap worker) | 11.2 KB |
+| Worker module (registry, conversion pipeline, metadata layer, pako) | 30.6 KB |
+| PNG codec (lazy) | 106 KB |
+| JPEG codec (lazy) | 177 KB |
+| WebP codec (lazy) | 228 KB |
+| TIFF (lazy, pure JS) | 28 KB |
+| JPEG XL codec (lazy) | 1.13 MB |
+| AVIF codec (lazy) | 1.95 MB |
+
+A user converting a single JPEG downloads the first two rows plus the codecs
+for JPEG and the chosen target. Base64 embedding costs about 1.3x on the
+gzipped wasm compared with a raw `.wasm` file; that is the price of keeping
+`connect-src 'none'`.
 
 ## Development
 
@@ -109,45 +220,40 @@ Node 20+ and npm.
 ```sh
 npm install
 npx playwright install chromium   # once; needed by the browser + e2e tests
-npm run dev        # local dev server (relaxes ONLY connect-src for hot reload)
+npm run dev        # local dev server (relaxes ONLY connect-src/style-src/worker-src for HMR)
 npm run build      # typecheck + production build to dist/ (base /airgap/)
 npm run preview    # serve dist/ at http://localhost:4173/airgap/
-npm test           # Vitest: node unit tests + canvas codec tests in headless Chromium
+npm test           # Vitest: node unit tests + real-codec tests in headless Chromium
 npm run test:e2e   # Playwright against the production build
 npm run fixtures   # regenerate tests/fixtures/ deterministically
+node scripts/bundle-report.mjs
 ```
 
 ### Layout
 
 ```
-src/codecs/types.ts        Codec interface, DecodedImage, capabilities
-src/codecs/canvas.ts       PNG/JPEG/WebP via createImageBitmap + OffscreenCanvas
-src/inspect.ts             pure header parsing: bit depth, alpha, EXIF/GPS, ICC, animation
-src/capabilities.ts        pure: source + target -> list of losses (the core logic)
-src/flatten.ts             pure alpha compositing onto a chosen colour
-src/convert.ts             pure orchestration + post-conversion verification
-src/worker.ts              runs decode/encode off the main thread
-src/ui/                    drag-and-drop, source facts, target picker, loss panel, result
-tests/unit/                Vitest, node: capabilities matrix, inspect, flatten, convert
-tests/browser/             Vitest browser mode: real codec round trips in Chromium
-tests/e2e/                 Playwright: drop, convert, download, decode; privacy trap
+src/codecs/types.ts        Codec interface, PixelData (8/10/12/16-bit RGBA), capabilities
+src/codecs/probe.ts        runtime capability probe (pure: codec API only)
+src/codecs/registry.ts     per-format ordered codecs, lazy loading, per-file fallback
+src/codecs/canvas.ts       browser canvas fallback (exactAlpha: false)
+src/codecs/wasm/*.ts       @jsquash-backed PNG, JPEG, WebP, AVIF, JPEG XL
+src/codecs/tiff.ts         utif decode + own baseline writer
+src/inspect.ts             pure header parsing for all six formats
+src/capabilities.ts        pure: source + target + probed pipeline -> list of losses
+src/convert.ts             pure orchestration: ICC, bit depth, flatten, metadata, verification
+src/metadata/tiff-ifd.ts   generic TIFF IFD parser/serializer
+src/metadata/exif.ts       EXIF summarise, strip GPS, normalise orientation
+src/metadata/containers.ts EXIF/ICC/XMP in and out of JPEG, PNG, WebP containers
+src/metadata/icc.ts        ICC parse, matrix/LUT classification, matrix/TRC -> sRGB
+src/worker-boot.ts         inline blob: bootstrap so the worker inherits the CSP
+src/worker.ts              conversion worker
+src/ui/                    drag-and-drop, source facts, target picker, modes, loss panel, result
+tests/unit/                Vitest, node: matrix, metadata layer, ICC, TIFF writer vs two readers
+tests/browser/             Vitest browser mode: real codecs, probes, full pipeline, exifr
+tests/e2e/                 Playwright: downloads re-read independently, privacy trap
 tests/fixtures/            generated by scripts/make-fixtures.mjs
+docs/                      Phase 3 codec survey
 ```
-
-### Fixtures
-
-`npm run fixtures` writes, deterministically:
-
-- `rgb8.png` 64x48 8-bit RGB (gradients plus a noise band)
-- `rgba-partial.png` 64x48 RGBA with opaque, semi-transparent, fully transparent
-  (with hidden colour) and alpha=1 bands
-- `rgb16.png` 32x32 16-bit RGB with values not representable in 8 bits
-- `exif-gps.jpg` 64x48 JPEG with an EXIF APP1 segment containing Orientation and
-  a GPS IFD (latitude/longitude)
-- `one-pixel.png` 1x1 RGB
-
-`tests/fixtures/pattern.mjs` is the shared pixel formula, so tests assert exact
-expected values without trusting any decoder.
 
 ## Deploy
 
