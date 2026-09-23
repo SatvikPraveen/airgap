@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"],
+    "types": []
+  },
+  "include": ["src/worker.ts", "src/codecs", "src/capabilities.ts", "src/convert.ts", "src/inspect.ts", "src/flatten.ts", "src/protocol.ts"],
+  "exclude": []
+}
