@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { inspect, parseTiff, sniffFormat, UnsupportedFormatError } from '../../src/inspect';
 import * as P from '../fixtures/pattern.mjs';
 
-const fx = (name: string) => new Uint8Array(readFileSync(join(__dirname, '..', 'fixtures', name)));
+const here = dirname(fileURLToPath(import.meta.url));
+const fx = (name: string) => new Uint8Array(readFileSync(join(here, '..', 'fixtures', name)));
 
 describe('inspect: PNG', () => {
   it('rgb8.png: 8-bit, no alpha, no metadata', () => {
