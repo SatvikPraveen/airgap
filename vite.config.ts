@@ -12,7 +12,17 @@ function devOnlyCsp(): Plugin {
     name: 'airgap-dev-csp',
     apply: 'serve',
     transformIndexHtml(html) {
-      return html.replace("connect-src 'none'", "connect-src 'self' ws: wss:");
+      // Only touch the <meta> tag's content attribute, not the explanatory comment above it.
+      return html.replace(
+        /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")([^"]*)(")/,
+        (_m, open: string, policy: string, close: string) =>
+          open +
+          policy
+            .replace("connect-src 'none'", "connect-src 'self' ws: wss:")
+            // Vite dev injects styles from JS; the production build ships a real stylesheet.
+            .replace("style-src 'self'", "style-src 'self' 'unsafe-inline'") +
+          close,
+      );
     },
   };
 }

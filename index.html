@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Content Security Policy. This is the mechanical guarantee behind the
+      privacy claim: the browser itself refuses any connection from this page.
+        connect-src 'none'  -> no fetch / XHR / WebSocket / beacon, to anywhere
+        default-src 'none'  -> nothing loads unless a directive below allows it
+        img-src blob:       -> previews of the user's own in-memory images only
+      In `vite dev` ONLY, vite.config.ts relaxes connect-src for hot reload.
+      `vite build` and `vite preview` (what the e2e suite tests) ship this exactly.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; worker-src 'self'; connect-src 'none'; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Airgap</title>
+    <link rel="icon" href="/airgap/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main id="app" aria-busy="true">
+      <noscript>Airgap needs JavaScript: the conversion runs in your browser, not on a server.</noscript>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
