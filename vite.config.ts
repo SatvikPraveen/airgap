@@ -20,7 +20,9 @@ function devOnlyCsp(): Plugin {
           policy
             .replace("connect-src 'none'", "connect-src 'self' ws: wss:")
             // Vite dev injects styles from JS; the production build ships a real stylesheet.
-            .replace("style-src 'self'", "style-src 'self' 'unsafe-inline'") +
+            .replace("style-src 'self'", "style-src 'self' 'unsafe-inline'")
+            // Vite dev may start workers from their dev-server URL rather than a blob.
+            .replace('worker-src blob:', "worker-src blob: 'self'") +
           close,
       );
     },

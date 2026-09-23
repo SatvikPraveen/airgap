@@ -39,7 +39,16 @@ cannot store alpha. Airgap does the same conversions, but it:
 2. **The CSP.** View the page source. The `Content-Security-Policy` meta tag
    contains `connect-src 'none'` and `default-src 'none'`. That is the browser
    itself refusing to let the page open any connection, regardless of what the
-   JavaScript tries to do.
+   JavaScript tries to do. One subtlety matters for the worker that does the
+   actual conversion: a meta-tag CSP applies to the document, and a dedicated
+   worker started from a same-origin URL takes its policy from the worker
+   script's HTTP response headers instead, which GitHub Pages does not send.
+   Airgap therefore starts its worker from a `blob:` URL (`worker-src blob:`),
+   and a blob worker inherits the page's policy. This was verified in Chromium:
+   inside the blob worker, `fetch()` of both cross-origin and same-origin URLs
+   raises a `connect-src` violation and no request is made, while a worker
+   loaded from a plain URL under the same page was able to fetch. The e2e
+   suite asserts that every worker on the page runs on a `blob:` URL.
 3. **The automated test.** `npm run test:e2e` runs `tests/e2e/privacy.spec.ts`
    against the production build. After the app is ready it routes every request
    through a handler that records and aborts it, records every CSP violation

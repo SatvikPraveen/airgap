@@ -8,12 +8,15 @@
         connect-src 'none'  -> no fetch / XHR / WebSocket / beacon, to anywhere
         default-src 'none'  -> nothing loads unless a directive below allows it
         img-src blob:       -> previews of the user's own in-memory images only
+        worker-src blob:    -> the worker is started from a blob: URL so that it
+                               inherits this policy; a worker started from a
+                               same-origin URL would NOT be covered by a meta CSP
       In `vite dev` ONLY, vite.config.ts relaxes connect-src for hot reload.
       `vite build` and `vite preview` (what the e2e suite tests) ship this exactly.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; worker-src 'self'; connect-src 'none'; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; worker-src blob:; connect-src 'none'; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />

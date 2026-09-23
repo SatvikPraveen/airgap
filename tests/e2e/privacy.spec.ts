@@ -35,11 +35,38 @@ test('zero network requests and zero CSP violations during a full conversion', a
   expect(await trap.cspViolations(), 'CSP violations').toEqual([]);
 });
 
+test('the conversion worker runs on a blob: URL, so it inherits the page CSP', async ({ page }) => {
+  await openApp(page);
+  const urls = page.workers().map((w) => w.url());
+  expect(urls.length).toBeGreaterThan(0);
+  for (const u of urls) expect(u, 'worker URL').toMatch(/^blob:/);
+});
+
+test('positive control: a blob worker spawned by the page cannot fetch either', async ({ page }) => {
+  await armCspRecorder(page);
+  await openApp(page);
+  const trap = await installNetworkTrap(page);
+  const result = await page.evaluate(
+    () =>
+      new Promise<string>((resolve) => {
+        const src = `fetch('https://example.invalid/from-worker').then(r => postMessage('resolved ' + r.status), e => postMessage('rejected ' + e.message));`;
+        const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+        w.onmessage = (e) => resolve(String(e.data));
+        w.onerror = (e) => resolve('worker error ' + e.message);
+        setTimeout(() => resolve('timeout'), 3000);
+      }),
+  );
+  expect(result).toMatch(/^rejected/);
+  expect(trap.requests.filter((r) => r.includes('example.invalid'))).toEqual([]);
+});
+
 test('the CSP forbids connections: connect-src is none, and no external hosts anywhere', async ({ page }) => {
   await openApp(page);
   const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
   expect(csp).toContain("connect-src 'none'");
   expect(csp).toContain("default-src 'none'");
+  expect(csp).toContain('worker-src blob:');
+  expect(csp).not.toMatch(/worker-src[^;]*'self'/);
   expect(csp).not.toMatch(/https?:/);
   expect(csp).not.toContain('*');
 });

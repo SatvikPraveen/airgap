@@ -15,5 +15,5 @@
     "noEmit": true
   },
   "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"],
-  "exclude": ["src/worker.ts"]
+  "exclude": ["src/worker.ts", "src/worker-boot.ts"]
 }

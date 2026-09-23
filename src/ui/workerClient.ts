@@ -2,6 +2,8 @@
 import type { CapabilityTable } from '../codecs/types';
 import type { ConversionPlan, Verification } from '../convert';
 import type { FromWorker, SourceInfo, ToWorker, WebpProbeResult } from '../protocol';
+import BootWorker from '../worker-boot.ts?worker&inline';
+import workerModuleUrl from '../worker.ts?worker&url';
 
 export interface ConvertedMessage {
   bytes: ArrayBuffer;
@@ -21,7 +23,10 @@ export class WorkerClient {
   private nextId = 1;
 
   constructor() {
-    this.worker = new Worker(new URL('../worker.ts', import.meta.url), { type: 'module' });
+    // Blob-URL bootstrap so the worker inherits the page CSP (see worker-boot.ts),
+    // then the real worker module is imported by absolute same-origin URL.
+    this.worker = new BootWorker();
+    this.worker.postMessage({ type: 'boot', url: new URL(workerModuleUrl, location.href).href });
     this.worker.onmessage = (ev: MessageEvent<FromWorker>) => this.dispatch(ev.data);
     this.worker.onerror = (ev) => {
       for (const p of this.pending.values()) p.reject(new Error(ev.message || 'Worker crashed'));
