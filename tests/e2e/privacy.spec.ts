@@ -1,39 +1,87 @@
 /**
- * The privacy test. After the app is ready, EVERY request of any kind fails
- * the test, and every Content-Security-Policy violation fails it too (a
- * fetch() blocked by connect-src 'none' never becomes a request, so the CSP
- * layer must be watched as well). A full conversion is exercised in between.
+ * The privacy test. After the app is ready AND the codecs a conversion needs
+ * have been loaded, EVERY request of any kind fails the test, and every
+ * Content-Security-Policy violation fails it too (a fetch() blocked by
+ * connect-src 'none' never becomes a request, so the CSP layer must be
+ * watched as well). Full conversions are exercised in between.
  *
- * Verified to be able to fail: a temporary `fetch('https://example.com')`
- * added to src/ui/app.ts turned this red via the CSP-violation channel, and
- * with connect-src removed from index.html it turned red via the request
- * channel. Both changes were reverted. The `positive control` test below keeps
- * that check automated.
+ * Lazily loaded codec chunks are the one thing that legitimately loads after
+ * first paint. A separate test pins them down: the only requests allowed while
+ * a codec loads are GETs of files that exist, by exact name, in the production
+ * build's assets directory.
+ *
+ * Verified to be able to fail (re-verified for Phase 3): a temporary
+ * `fetch('https://example.invalid/leak-test')` in src/ui/app.ts turned the
+ * conversion test red via the CSP-violation channel, and with connect-src
+ * relaxed via the request channel. Both changes were reverted. The positive
+ * controls below keep that check automated, including from inside a worker.
  */
 import { expect, test } from '@playwright/test';
-import { armCspRecorder, convertAndDownload, installNetworkTrap, openApp, pickFixture } from './helpers';
+import { armCspRecorder, builtAssetNames, convertAndDownload, installNetworkTrap, openApp, pickFixture, selectTarget } from './helpers';
 
-test('zero network requests and zero CSP violations during a full conversion', async ({ page }) => {
+test('zero network requests and zero CSP violations during full conversions (codecs pre-loaded)', async ({ page }) => {
   await armCspRecorder(page);
   await openApp(page);
+  // Warm the codecs this test will use, so that the trap below is absolute.
+  await pickFixture(page, 'exif-gps.jpg');
+  await selectTarget(page, 'webp-lossy');
+  await selectTarget(page, 'jpeg');
+  await selectTarget(page, 'png');
+  await selectTarget(page, 'tiff');
+  await page.waitForLoadState('networkidle');
   const trap = await installNetworkTrap(page);
 
-  await pickFixture(page, 'exif-gps.jpg');
-  await page.getByTestId('target').selectOption('webp-lossy');
+  await selectTarget(page, 'webp-lossy');
   await page.getByTestId('quality').fill('70');
+  await page.getByTestId('meta-strip-gps').check();
   await convertAndDownload(page);
 
   await pickFixture(page, 'rgba-partial.png');
-  await page.getByTestId('target').selectOption('jpeg');
+  await selectTarget(page, 'jpeg');
   await convertAndDownload(page);
 
-  await page.getByTestId('target').selectOption('png');
+  await selectTarget(page, 'png');
+  await convertAndDownload(page);
+
+  await selectTarget(page, 'tiff');
   await convertAndDownload(page);
 
   expect(trap.requests, 'requests observed after load').toEqual([]);
   expect(trap.websockets, 'websockets opened after load').toEqual([]);
   expect(await trap.cspViolations(), 'CSP violations').toEqual([]);
 });
+
+test('lazy codec loading only ever requests the build\'s own asset files by exact name (GET, no query)', async ({ page }) => {
+  await armCspRecorder(page);
+  await openApp(page);
+  const trap = await installNetworkTrapAllowingAssets(page);
+  await pickFixture(page, 'rgba-partial.png');
+  for (const key of ['png', 'webp-lossless', 'avif-lossless', 'jxl-lossy', 'tiff', 'jpeg']) await selectTarget(page, key);
+  await selectTarget(page, 'avif-lossless');
+  await convertAndDownload(page);
+  const assets = builtAssetNames();
+  expect(trap.seen.length).toBeGreaterThan(3); // codecs really did load lazily
+  for (const line of trap.seen) {
+    const m = /^GET http:\/\/localhost:4173\/airgap\/(assets\/[^?#]+)$/.exec(line);
+    expect(m, `request must be a plain GET of a built asset: ${line}`).not.toBeNull();
+    expect(assets.has(m![1]!), `must exist in dist/assets by exact name: ${line}`).toBe(true);
+  }
+  expect(await trap.cspViolations()).toEqual([]);
+});
+
+/** Like installNetworkTrap but lets same-origin built assets through (recorded), aborting everything else. */
+async function installNetworkTrapAllowingAssets(page: import('@playwright/test').Page) {
+  const seen: string[] = [];
+  const assets = builtAssetNames();
+  await page.route('**/*', (route) => {
+    const line = `${route.request().method()} ${route.request().url()}`;
+    seen.push(line);
+    const m = /^GET http:\/\/localhost:4173\/airgap\/(assets\/[^?#]+)$/.exec(line);
+    if (m && assets.has(m[1]!)) return route.continue();
+    return route.abort('blockedbyclient');
+  });
+  return { seen, cspViolations: () => page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations) };
+}
 
 test('the conversion worker runs on a blob: URL, so it inherits the page CSP', async ({ page }) => {
   await openApp(page);
@@ -60,13 +108,16 @@ test('positive control: a blob worker spawned by the page cannot fetch either', 
   expect(trap.requests.filter((r) => r.includes('example.invalid'))).toEqual([]);
 });
 
-test('the CSP forbids connections: connect-src is none, and no external hosts anywhere', async ({ page }) => {
+test('the CSP: connect-src none, worker-src blob only, wasm-unsafe-eval but never unsafe-eval, no external hosts', async ({ page }) => {
   await openApp(page);
-  const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
+  const csp = (await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'))!;
   expect(csp).toContain("connect-src 'none'");
   expect(csp).toContain("default-src 'none'");
   expect(csp).toContain('worker-src blob:');
   expect(csp).not.toMatch(/worker-src[^;]*'self'/);
+  expect(csp).toMatch(/script-src 'self' 'wasm-unsafe-eval'/);
+  expect(csp).not.toMatch(/'unsafe-eval'/);
+  expect(csp).not.toMatch(/'unsafe-inline'/);
   expect(csp).not.toMatch(/https?:/);
   expect(csp).not.toContain('*');
 });
@@ -75,7 +126,6 @@ test('positive control: the trap DOES catch a fetch, an image beacon and a webso
   await armCspRecorder(page);
   await openApp(page);
   const trap = await installNetworkTrap(page);
-
   await page.evaluate(async () => {
     await fetch('https://example.invalid/leak').catch(() => undefined);
     await new Promise<void>((resolve) => {
@@ -91,16 +141,10 @@ test('positive control: the trap DOES catch a fetch, an image beacon and a webso
       /* CSP throws synchronously */
     }
   });
-
   const violations = await trap.cspViolations();
   const seen = `violations: ${violations.join(' | ')} / requests: ${trap.requests.join(' | ')}`;
-  // fetch() and WebSocket are stopped by connect-src before any request exists:
-  // only the violation channel can see them.
   expect(violations.filter((v) => v.startsWith('connect-src')).length, seen).toBeGreaterThanOrEqual(2);
-  // The <img> is stopped by img-src. Chromium additionally surfaces the blocked
-  // request to the automation layer, so both channels may see it.
   expect(violations.some((v) => v.startsWith('img-src')), seen).toBe(true);
-  // Nothing other than our deliberate leak attempts was observed.
   for (const r of trap.requests) expect(r, seen).toContain('example.invalid');
   expect(trap.websockets, seen).toEqual([]);
 });

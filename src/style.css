@@ -373,3 +373,25 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+fieldset.field {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px 12px;
+  margin: 0;
+}
+
+fieldset.field legend {
+  font-weight: 600;
+  font-size: 14px;
+  padding: 0 6px;
+}
+
+.radios {
+  display: grid;
+  gap: 8px;
+}
+
+.radios input:disabled + span {
+  opacity: 0.55;
+}

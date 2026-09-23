@@ -1,26 +1,27 @@
 /** Promise wrapper around the conversion worker. */
-import type { CapabilityTable } from '../codecs/types';
+import type { CapabilityTable, ImageFormat } from '../codecs/types';
 import type { ConversionPlan, Verification } from '../convert';
-import type { FromWorker, SourceInfo, ToWorker, WebpProbeResult } from '../protocol';
+import type { FromWorker, SourceInfo, ToWorker } from '../protocol';
 import BootWorker from '../worker-boot.ts?worker&inline';
 import workerModuleUrl from '../worker.ts?worker&url';
 
 export interface ConvertedMessage {
   bytes: ArrayBuffer;
   mime: string;
-  format: string;
+  format: ImageFormat;
+  bitDepth: number;
+  encoderId: string;
   verification: Verification;
 }
 
-export interface Ready {
-  caps: CapabilityTable;
-  webpLosslessProbe: WebpProbeResult;
-}
+type Pending = { resolve: (m: FromWorker) => void; reject: (e: Error) => void };
 
 export class WorkerClient {
   private worker: Worker;
-  private pending = new Map<number | null, { resolve: (m: FromWorker) => void; reject: (e: Error) => void }>();
+  private pending = new Map<string, Pending>();
   private nextId = 1;
+  /** Fires whenever the worker reports a new capability table. */
+  onCaps: (caps: CapabilityTable) => void = () => {};
 
   constructor() {
     // Blob-URL bootstrap so the worker inherits the page CSP (see worker-boot.ts),
@@ -35,7 +36,9 @@ export class WorkerClient {
   }
 
   private dispatch(msg: FromWorker): void {
-    const key = msg.type === 'ready' ? null : msg.id;
+    if ('caps' in msg && msg.caps) this.onCaps(msg.caps);
+    const key =
+      msg.type === 'ready' ? 'init' : msg.type === 'caps' ? `ensure:${msg.format}:${msg.role}` : msg.id === null ? 'init' : `id:${msg.id}`;
     const p = this.pending.get(key);
     if (!p) return;
     this.pending.delete(key);
@@ -43,35 +46,43 @@ export class WorkerClient {
       const e = new Error(msg.message);
       e.name = msg.name;
       p.reject(e);
+    } else if (msg.type === 'caps' && msg.error) {
+      p.reject(new Error(msg.error));
     } else {
       p.resolve(msg);
     }
   }
 
-  private send(msg: ToWorker, key: number | null, transfer: Transferable[] = []): Promise<FromWorker> {
+  private send(msg: ToWorker, key: string, transfer: Transferable[] = []): Promise<FromWorker> {
     return new Promise((resolve, reject) => {
       this.pending.set(key, { resolve, reject });
       this.worker.postMessage(msg, transfer);
     });
   }
 
-  async init(): Promise<Ready> {
-    const m = await this.send({ type: 'init' }, null);
+  async init(): Promise<CapabilityTable> {
+    const m = await this.send({ type: 'init' }, 'init');
     if (m.type !== 'ready') throw new Error('unexpected worker reply');
-    return { caps: m.caps, webpLosslessProbe: m.webpLosslessProbe };
+    return m.caps;
+  }
+
+  async ensure(format: ImageFormat, role: 'decode' | 'encode'): Promise<CapabilityTable> {
+    const m = await this.send({ type: 'ensure', format, role }, `ensure:${format}:${role}`);
+    if (m.type !== 'caps') throw new Error('unexpected worker reply');
+    return m.caps;
   }
 
   async load(bytes: ArrayBuffer): Promise<{ id: number; info: SourceInfo }> {
     const id = this.nextId++;
-    const m = await this.send({ type: 'load', id, bytes }, id, [bytes]);
+    const m = await this.send({ type: 'load', id, bytes }, `id:${id}`, [bytes]);
     if (m.type !== 'loaded') throw new Error('unexpected worker reply');
     return { id, info: m.info };
   }
 
   async convert(id: number, plan: ConversionPlan): Promise<ConvertedMessage> {
-    const m = await this.send({ type: 'convert', id, plan }, id);
+    const m = await this.send({ type: 'convert', id, plan }, `id:${id}`);
     if (m.type !== 'converted') throw new Error('unexpected worker reply');
-    return { bytes: m.bytes, mime: m.mime, format: m.format, verification: m.verification };
+    return { bytes: m.bytes, mime: m.mime, format: m.format, bitDepth: m.bitDepth, encoderId: m.encoderId, verification: m.verification };
   }
 
   unload(id: number): void {
