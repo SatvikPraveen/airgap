@@ -14,6 +14,6 @@
     "types": ["vite/client"],
     "noEmit": true
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"],
+  "include": ["src", "tests", "vite.config.ts", "vite-plugins.ts", "vitest.config.ts", "playwright.config.ts"],
   "exclude": ["src/worker.ts", "src/worker-boot.ts"]
 }

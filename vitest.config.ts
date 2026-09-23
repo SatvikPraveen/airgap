@@ -1,7 +1,9 @@
 import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
+import { wasmBase64 } from './vite-plugins';
 
 export default defineConfig({
+  plugins: [wasmBase64()],
   test: {
     projects: [
       {

@@ -1,4 +1,5 @@
 import { defineConfig, type Plugin } from 'vite';
+import { wasmBase64 } from './vite-plugins';
 
 /**
  * The committed index.html carries the strict production CSP
@@ -31,7 +32,7 @@ function devOnlyCsp(): Plugin {
 
 export default defineConfig({
   base: '/airgap/',
-  plugins: [devOnlyCsp()],
+  plugins: [devOnlyCsp(), wasmBase64()],
   build: {
     target: 'es2022',
     // Never inline assets as data: URIs; keep everything as plain same-origin files.
@@ -41,6 +42,11 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+    plugins: () => [wasmBase64()],
+  },
+  optimizeDeps: {
+    // Upstream jSquash guidance: keep the wasm packages out of the dev pre-bundler.
+    exclude: ['@jsquash/png', '@jsquash/jpeg', '@jsquash/webp', '@jsquash/avif', '@jsquash/jxl'],
   },
   preview: {
     port: 4173,

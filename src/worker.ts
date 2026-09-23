@@ -1,18 +1,19 @@
 /// <reference lib="webworker" />
 /**
  * Conversion worker. Owns decoded images so the UI thread never touches
- * pixel buffers. Nothing in here can make a network request: there is no
- * fetch, no XHR, no importScripts, and the page CSP forbids them anyway.
+ * pixel buffers. Runs inside the blob-URL bootstrap (worker-boot.ts), so the
+ * page CSP applies here: no fetch, no XHR, no WebSocket is possible.
  */
-import { createCanvasCodec, probeWebpLossless } from './codecs/canvas';
-import type { CapabilityTable, Codec, DecodedImage, ImageFormat } from './codecs/types';
-import { convert } from './convert';
+import { CodecRegistry } from './codecs/registry';
+import type { DecodedImage, ImageFormat } from './codecs/types';
+import { convert, prepareSource } from './convert';
 import { sniffFormat, UnsupportedFormatError } from './inspect';
-import type { FromWorker, ToWorker } from './protocol';
+import { summarizeExif } from './metadata/exif';
+import type { FromWorker, SourceInfo, ToWorker } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
 
-let codecs: Record<ImageFormat, Codec> | null = null;
+const registry = new CodecRegistry();
 const images = new Map<number, { decoded: DecodedImage; format: ImageFormat }>();
 
 function post(msg: FromWorker, transfer: Transferable[] = []): void {
@@ -25,49 +26,58 @@ function fail(id: number | null, err: unknown): void {
 }
 
 async function init(): Promise<void> {
-  const probe = await probeWebpLossless();
-  codecs = {
-    png: createCanvasCodec('png'),
-    jpeg: createCanvasCodec('jpeg'),
-    webp: createCanvasCodec('webp', probe.lossless),
-  };
-  const caps: CapabilityTable = {
-    png: codecs.png.capabilities,
-    jpeg: codecs.jpeg.capabilities,
-    webp: codecs.webp.capabilities,
-  };
-  post({ type: 'ready', caps, webpLosslessProbe: probe });
+  post({ type: 'ready', caps: registry.table() });
+}
+
+async function ensure(format: ImageFormat, role: 'decode' | 'encode'): Promise<void> {
+  try {
+    await registry.resolve(format, role);
+    post({ type: 'caps', caps: registry.table(), format, role });
+  } catch (err) {
+    post({ type: 'caps', caps: registry.table(), format, role, error: (err as Error).message });
+  }
 }
 
 async function load(id: number, buffer: ArrayBuffer): Promise<void> {
-  if (!codecs) throw new Error('Worker not initialised.');
   const bytes = new Uint8Array(buffer);
   const format = sniffFormat(bytes);
-  if (!format) {
-    throw new UnsupportedFormatError(
-      'Unrecognised file. Phase 1 supports PNG, JPEG and WebP input only.',
-    );
-  }
-  const decoded = await codecs[format].decode(bytes);
+  if (!format) throw new UnsupportedFormatError('Unrecognised file. Airgap reads PNG, JPEG, WebP, AVIF, JPEG XL and TIFF.');
+  const { image, used } = await registry.decode(format, bytes);
+  const decoded = prepareSource(image);
   images.set(id, { decoded, format });
-  post({
-    type: 'loaded',
-    id,
-    info: {
-      format,
-      width: decoded.pixels.width,
-      height: decoded.pixels.height,
-      metadata: decoded.metadata,
-    },
-  });
+  const { exif, icc, xmp, ...facts } = decoded.metadata;
+  void icc;
+  void xmp;
+  const info: SourceInfo = {
+    format,
+    width: decoded.pixels.width,
+    height: decoded.pixels.height,
+    metadata: facts,
+    decoder: used.resolved,
+  };
+  if (exif) {
+    try {
+      info.exifSummary = summarizeExif(exif);
+    } catch {
+      /* unreadable EXIF: facts from the header still stand */
+    }
+  }
+  post({ type: 'loaded', id, info, caps: registry.table() });
 }
 
 async function doConvert(id: number, plan: Parameters<typeof convert>[3]): Promise<void> {
-  if (!codecs) throw new Error('Worker not initialised.');
   const entry = images.get(id);
   if (!entry) throw new Error('Image not loaded (or already discarded).');
-  const result = await convert(codecs, entry.decoded, entry.format, plan);
-  const buffer = result.bytes.buffer as ArrayBuffer;
+  const enc = await registry.resolve(plan.target.format, 'encode');
+  const ver = await registry.resolve(plan.target.format, 'decode');
+  const dec = registry.table()[entry.format]?.decode;
+  const result = await convert(
+    { encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: dec?.capabilities ?? ver.resolved.capabilities, verifier: ver.codec },
+    entry.decoded,
+    entry.format,
+    plan,
+  );
+  const buffer = result.bytes.buffer.slice(result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength) as ArrayBuffer;
   post(
     {
       type: 'converted',
@@ -75,7 +85,10 @@ async function doConvert(id: number, plan: Parameters<typeof convert>[3]): Promi
       bytes: buffer,
       mime: result.mime,
       format: result.format,
+      bitDepth: result.bitDepth,
+      encoderId: result.encoderId,
       verification: result.verification,
+      caps: registry.table(),
     },
     [buffer],
   );
@@ -86,6 +99,9 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
   switch (msg.type) {
     case 'init':
       init().catch((e) => fail(null, e));
+      break;
+    case 'ensure':
+      ensure(msg.format, msg.role).catch((e) => fail(null, e));
       break;
     case 'load':
       load(msg.id, msg.bytes).catch((e) => fail(msg.id, e));
