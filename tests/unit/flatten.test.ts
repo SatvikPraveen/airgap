@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { alphaStats, flattenRgba, parseHexColor, toHexColor, WHITE } from '../../src/flatten';
+import { flattenRgba, parseHexColor, toHexColor, WHITE } from '../../src/flatten';
+import { alphaStats as pixelAlphaStats } from '../../src/pixels';
+const alphaStats = (d: Uint8ClampedArray) => pixelAlphaStats({ width: d.length / 4, height: 1, bitDepth: 8, data: d });
 import * as P from '../fixtures/pattern.mjs';
 
 describe('flattenRgba', () => {

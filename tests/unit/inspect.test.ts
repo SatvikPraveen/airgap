@@ -66,6 +66,7 @@ describe('inspect: JPEG', () => {
         hasGps: true,
         orientation: 1,
         hasIcc: false,
+        hasXmp: false,
         sourceLossless: false,
       },
     });

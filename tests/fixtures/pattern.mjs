@@ -50,3 +50,46 @@ export function rgb16Pixel(x, y) {
   const b = ((x * y) * 977 + 31) & 0xffff;
   return [r, g, b];
 }
+
+export const RGBA16 = { width: 24, height: 20 };
+export const ORIENT = { width: 48, height: 32 };
+export const ICC_P3 = { width: 16, height: 16 };
+
+/** 16-bit RGBA with values not representable in 8 bits, and every alpha band (opaque, semi, zero-with-colour, 1). */
+export function rgba16Pixel(x, y) {
+  const r = (x * 2741 + 517) & 0xffff;
+  const g = (y * 4099 + 3) & 0xffff;
+  const b = ((x + y) * 1237 + 12345) & 0xffff;
+  let a;
+  if (y < 5) a = 0xffff;
+  else if (y < 10) a = 1 + ((x * 3001) % 0xfffe);
+  else if (y < 15) a = 0;
+  else a = 1;
+  return [r, g, b, a];
+}
+
+/** Four flat quadrants: TL red, TR green, BL blue, BR yellow. Used with EXIF Orientation=6. */
+export function quadrantPixel(x, y) {
+  const right = x >= ORIENT.width / 2;
+  const bottom = y >= ORIENT.height / 2;
+  if (!right && !bottom) return [220, 30, 30];
+  if (right && !bottom) return [30, 200, 40];
+  if (!right && bottom) return [30, 60, 220];
+  return [230, 220, 40];
+}
+
+/** Display-P3-tagged test image: a few flat patches with known device values. */
+export const P3_PATCHES = [
+  [255, 0, 0],
+  [0, 255, 0],
+  [0, 0, 255],
+  [128, 128, 128],
+  [200, 120, 60],
+  [40, 160, 200],
+  [255, 255, 255],
+  [0, 0, 0],
+];
+export function p3Pixel(x, y) {
+  const i = Math.floor(x / 2) % P3_PATCHES.length;
+  return P3_PATCHES[i];
+}

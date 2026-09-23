@@ -1,258 +1,237 @@
 /**
- * Table-driven coverage of computeLosses() over the whole Phase 1 matrix:
- * every source archetype x every target, with the canvas codec's capabilities.
+ * Table-driven coverage of computeLosses() over the Phase 3 matrix: every
+ * source archetype x every target, through an ideal (fully verified) wasm
+ * pipeline, plus the canvas fallback pipeline, plus metadata/ICC modes.
+ * Codecs are never named: only capability fields go in.
  */
 import { describe, expect, it } from 'vitest';
 import {
   computeLosses,
+  DEFAULT_MODES,
   isFullyLossless,
   isPixelLossless,
   needsFlatten,
+  plannedBitDepth,
   type LossKind,
   type SourceDescription,
   type TargetSpec,
 } from '../../src/capabilities';
-import { canvasCapabilities } from '../../src/codecs/canvas-capabilities';
-import type { ImageMetadata } from '../../src/codecs/types';
+import type { CodecCapabilities, ImageFormat } from '../../src/codecs/types';
+import { canvasCaps, caps, META } from './helpers';
 
-const base: ImageMetadata = {
-  bitDepth: 8,
-  hasAlpha: false,
-  hasTransparency: false,
-  hasSemiTransparency: false,
-  hasExif: false,
-  hasGps: false,
-  hasIcc: false,
-  isAnimated: false,
-};
-
-const sources: Record<string, SourceDescription> = {
-  'png rgb8': { format: 'png', metadata: { ...base, sourceLossless: true } },
-  'png rgba opaque': {
-    format: 'png',
-    metadata: { ...base, hasAlpha: true, sourceLossless: true },
-  },
-  'png rgba binary alpha': {
-    format: 'png',
-    metadata: { ...base, hasAlpha: true, hasTransparency: true, sourceLossless: true },
-  },
-  'png rgba partial': {
-    format: 'png',
-    metadata: {
-      ...base,
-      hasAlpha: true,
-      hasTransparency: true,
-      hasSemiTransparency: true,
-      sourceLossless: true,
-    },
-  },
-  'png rgb16': { format: 'png', metadata: { ...base, bitDepth: 16, sourceLossless: true } },
-  'png rgba16 partial + icc': {
-    format: 'png',
-    metadata: {
-      ...base,
-      bitDepth: 16,
-      hasAlpha: true,
-      hasTransparency: true,
-      hasSemiTransparency: true,
-      hasIcc: true,
-      sourceLossless: true,
-    },
-  },
-  'apng': { format: 'png', metadata: { ...base, isAnimated: true, sourceLossless: true } },
-  'jpeg plain': { format: 'jpeg', metadata: { ...base, sourceLossless: false } },
-  'jpeg exif+gps': {
-    format: 'jpeg',
-    metadata: { ...base, hasExif: true, hasGps: true, orientation: 6, sourceLossless: false },
-  },
-  'jpeg icc': { format: 'jpeg', metadata: { ...base, hasIcc: true, sourceLossless: false } },
-  'webp lossless alpha partial': {
-    format: 'webp',
-    metadata: {
-      ...base,
-      hasAlpha: true,
-      hasTransparency: true,
-      hasSemiTransparency: true,
-      sourceLossless: true,
-    },
-  },
-  'webp lossy': { format: 'webp', metadata: { ...base, sourceLossless: false } },
-  'webp animated exif': {
-    format: 'webp',
-    metadata: { ...base, isAnimated: true, hasExif: true, sourceLossless: false },
-  },
-};
-
-const targets: Record<string, TargetSpec> = {
-  png: { format: 'png', lossless: true },
-  jpeg: { format: 'jpeg', lossless: false },
-  'webp lossless': { format: 'webp', lossless: true },
-  'webp lossy': { format: 'webp', lossless: false },
-};
-
-const capsWith = (webpLossless: boolean) => ({
-  png: canvasCapabilities('png', webpLossless),
-  jpeg: canvasCapabilities('jpeg', webpLossless),
-  webp: canvasCapabilities('webp', webpLossless),
+const src = (format: ImageFormat, over: Partial<SourceDescription['metadata']> = {}): SourceDescription => ({
+  format,
+  metadata: { ...META, ...over },
 });
 
-/**
- * Expected loss kinds, in order, for [source][target] with a browser whose
- * WebP encoder IS lossless at quality 1 (Chromium: verified by the browser tests).
- */
-const expected: Record<string, Record<string, LossKind[]>> = {
-  'png rgb8': {
-    png: [],
-    jpeg: ['pixels-lossy'],
-    'webp lossless': [],
-    'webp lossy': ['pixels-lossy'],
-  },
-  'png rgba opaque': {
-    png: [],
-    jpeg: ['pixels-lossy', 'alpha'],
-    'webp lossless': [],
-    'webp lossy': ['pixels-lossy'],
-  },
-  'png rgba binary alpha': {
-    png: ['transparent-color'],
-    jpeg: ['pixels-lossy', 'alpha'],
-    'webp lossless': ['transparent-color'],
-    'webp lossy': ['pixels-lossy', 'transparent-color'],
-  },
-  'png rgba partial': {
-    png: ['premultiplied-alpha', 'transparent-color'],
-    jpeg: ['pixels-lossy', 'alpha'],
-    'webp lossless': ['premultiplied-alpha', 'transparent-color'],
-    'webp lossy': ['pixels-lossy', 'premultiplied-alpha', 'transparent-color'],
-  },
-  'png rgb16': {
-    png: ['bit-depth'],
-    jpeg: ['pixels-lossy', 'bit-depth'],
-    'webp lossless': ['bit-depth'],
-    'webp lossy': ['pixels-lossy', 'bit-depth'],
-  },
-  'png rgba16 partial + icc': {
-    png: ['bit-depth', 'premultiplied-alpha', 'transparent-color', 'icc'],
-    jpeg: ['pixels-lossy', 'bit-depth', 'alpha', 'icc'],
-    'webp lossless': ['bit-depth', 'premultiplied-alpha', 'transparent-color', 'icc'],
-    'webp lossy': ['pixels-lossy', 'bit-depth', 'premultiplied-alpha', 'transparent-color', 'icc'],
-  },
-  apng: {
-    png: ['animation'],
-    jpeg: ['pixels-lossy', 'animation'],
-    'webp lossless': ['animation'],
-    'webp lossy': ['pixels-lossy', 'animation'],
-  },
-  'jpeg plain': {
-    png: [],
-    jpeg: ['pixels-lossy'],
-    'webp lossless': [],
-    'webp lossy': ['pixels-lossy'],
-  },
-  'jpeg exif+gps': {
-    png: ['exif'],
-    jpeg: ['pixels-lossy', 'exif'],
-    'webp lossless': ['exif'],
-    'webp lossy': ['pixels-lossy', 'exif'],
-  },
-  'jpeg icc': {
-    png: ['icc'],
-    jpeg: ['pixels-lossy', 'icc'],
-    'webp lossless': ['icc'],
-    'webp lossy': ['pixels-lossy', 'icc'],
-  },
-  'webp lossless alpha partial': {
-    png: ['premultiplied-alpha', 'transparent-color'],
-    jpeg: ['pixels-lossy', 'alpha'],
-    'webp lossless': ['premultiplied-alpha', 'transparent-color'],
-    'webp lossy': ['pixels-lossy', 'premultiplied-alpha', 'transparent-color'],
-  },
-  'webp lossy': {
-    png: [],
-    jpeg: ['pixels-lossy'],
-    'webp lossless': [],
-    'webp lossy': ['pixels-lossy'],
-  },
-  'webp animated exif': {
-    png: ['animation', 'exif'],
-    jpeg: ['pixels-lossy', 'animation', 'exif'],
-    'webp lossless': ['animation', 'exif'],
-    'webp lossy': ['pixels-lossy', 'animation', 'exif'],
-  },
+const sources: Record<string, SourceDescription> = {
+  'png rgb8': src('png', { sourceLossless: true }),
+  'png rgba opaque': src('png', { hasAlpha: true, sourceLossless: true }),
+  'png rgba binary alpha': src('png', { hasAlpha: true, hasTransparency: true, sourceLossless: true }),
+  'png rgba partial': src('png', { hasAlpha: true, hasTransparency: true, hasSemiTransparency: true, sourceLossless: true }),
+  'png rgb16': src('png', { bitDepth: 16, sourceLossless: true }),
+  'png rgba16 partial': src('png', { bitDepth: 16, hasAlpha: true, hasTransparency: true, hasSemiTransparency: true, sourceLossless: true }),
+  apng: src('png', { isAnimated: true, sourceLossless: true }),
+  'jpeg plain': src('jpeg', { sourceLossless: false }),
+  'jpeg exif+gps': src('jpeg', { hasExif: true, hasGps: true, orientation: 6, sourceLossless: false }),
+  'jpeg icc matrix': src('jpeg', { hasIcc: true, iccKind: 'matrix', sourceLossless: false }),
+  'webp lossless alpha partial': src('webp', { hasAlpha: true, hasTransparency: true, hasSemiTransparency: true, sourceLossless: true }),
+  'avif 10-bit alpha': src('avif', { bitDepth: 10, hasAlpha: true, hasTransparency: true, hasSemiTransparency: true }),
+  'avif 12-bit': src('avif', { bitDepth: 12 }),
+  'jxl 8-bit': src('jxl', {}),
+  'jxl unknown depth': src('jxl', { bitDepthUncertain: true }),
+  'tiff rgb16': src('tiff', { bitDepth: 16, sourceLossless: true }),
+  'tiff rgba8 associated alpha': src('tiff', { hasAlpha: true, hasTransparency: true, hasSemiTransparency: true, alphaAssociated: true, sourceLossless: true }),
 };
 
-describe('computeLosses: Phase 1 matrix (WebP lossless available)', () => {
-  const caps = capsWith(true);
+/** Probed capabilities of the wasm codec set, as the Phase 3 registry declares them (all verified). */
+const ENC: Record<ImageFormat, CodecCapabilities> = {
+  png: caps({ encodeBitDepths: [8, 16] }),
+  jpeg: caps({ lossless: false, alpha: false, exactAlpha: false, decodeBitDepth: 8, encodeBitDepths: [8] }),
+  webp: caps({ decodeBitDepth: 8, encodeBitDepths: [8] }),
+  avif: caps({ decodeBitDepth: 12, encodeBitDepths: [8, 10, 12], metadata: { exif: false, icc: false, xmp: false } }),
+  // Reality in Chromium: the @jsquash/jxl pair is off by 1 on some pixels, so neither lossless nor decodeExact is verified.
+  jxl: caps({ lossless: false, exactAlpha: false, decodeBitDepth: 8, decodeExact: false, decodeAppliesIcc: true, encodeBitDepths: [8], metadata: { exif: false, icc: false, xmp: false } }),
+  tiff: caps({ encodeBitDepths: [8, 16] }),
+};
+const DEC = ENC;
+
+const targets: Record<string, TargetSpec> = {
+  png: { format: 'png', lossless: true, ...DEFAULT_MODES },
+  jpeg: { format: 'jpeg', lossless: false, ...DEFAULT_MODES },
+  'webp lossless': { format: 'webp', lossless: true, ...DEFAULT_MODES },
+  'webp lossy': { format: 'webp', lossless: false, ...DEFAULT_MODES },
+  'avif lossless': { format: 'avif', lossless: true, ...DEFAULT_MODES },
+  'avif lossy': { format: 'avif', lossless: false, ...DEFAULT_MODES },
+  'jxl lossless': { format: 'jxl', lossless: true, ...DEFAULT_MODES },
+  'jxl lossy': { format: 'jxl', lossless: false, ...DEFAULT_MODES },
+  tiff: { format: 'tiff', lossless: true, ...DEFAULT_MODES },
+};
+
+const L = (...k: LossKind[]) => k;
+const lossy = 'pixels-lossy' as const;
+
+/** Expected kinds, in order, source x target, default modes (strip-all / strip ICC). */
+const expected: Record<string, Record<string, LossKind[]>> = {
+  'png rgb8': { png: L(), jpeg: L(lossy), 'webp lossless': L(), 'webp lossy': L(lossy), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy), 'jxl lossy': L(lossy), tiff: L() },
+  'png rgba opaque': { png: L(), jpeg: L(lossy, 'alpha'), 'webp lossless': L(), 'webp lossy': L(lossy), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy), 'jxl lossy': L(lossy), tiff: L() },
+  'png rgba binary alpha': { png: L(), jpeg: L(lossy, 'alpha'), 'webp lossless': L(), 'webp lossy': L(lossy), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy, 'transparent-color'), 'jxl lossy': L(lossy, 'transparent-color'), tiff: L() },
+  'png rgba partial': { png: L(), jpeg: L(lossy, 'alpha'), 'webp lossless': L(), 'webp lossy': L(lossy), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy, 'premultiplied-alpha', 'transparent-color'), 'jxl lossy': L(lossy, 'premultiplied-alpha', 'transparent-color'), tiff: L() },
+  'png rgb16': { png: L(), jpeg: L(lossy, 'bit-depth'), 'webp lossless': L('bit-depth'), 'webp lossy': L(lossy, 'bit-depth'), 'avif lossless': L('bit-depth'), 'avif lossy': L(lossy, 'bit-depth'), 'jxl lossless': L(lossy, 'bit-depth'), 'jxl lossy': L(lossy, 'bit-depth'), tiff: L() },
+  'png rgba16 partial': { png: L(), jpeg: L(lossy, 'bit-depth', 'alpha'), 'webp lossless': L('bit-depth'), 'webp lossy': L(lossy, 'bit-depth'), 'avif lossless': L('bit-depth'), 'avif lossy': L(lossy, 'bit-depth'), 'jxl lossless': L(lossy, 'bit-depth', 'premultiplied-alpha', 'transparent-color'), 'jxl lossy': L(lossy, 'bit-depth', 'premultiplied-alpha', 'transparent-color'), tiff: L() },
+  apng: { png: L('animation'), jpeg: L(lossy, 'animation'), 'webp lossless': L('animation'), 'webp lossy': L(lossy, 'animation'), 'avif lossless': L('animation'), 'avif lossy': L(lossy, 'animation'), 'jxl lossless': L(lossy, 'animation'), 'jxl lossy': L(lossy, 'animation'), tiff: L('animation') },
+  'jpeg plain': { png: L(), jpeg: L(lossy), 'webp lossless': L(), 'webp lossy': L(lossy), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy), 'jxl lossy': L(lossy), tiff: L() },
+  'jpeg exif+gps': { png: L('exif'), jpeg: L(lossy, 'exif'), 'webp lossless': L('exif'), 'webp lossy': L(lossy, 'exif'), 'avif lossless': L('exif'), 'avif lossy': L(lossy, 'exif'), 'jxl lossless': L(lossy, 'exif'), 'jxl lossy': L(lossy, 'exif'), tiff: L('exif') },
+  'jpeg icc matrix': { png: L('icc'), jpeg: L(lossy, 'icc'), 'webp lossless': L('icc'), 'webp lossy': L(lossy, 'icc'), 'avif lossless': L('icc'), 'avif lossy': L(lossy, 'icc'), 'jxl lossless': L(lossy, 'icc'), 'jxl lossy': L(lossy, 'icc'), tiff: L('icc') },
+  'webp lossless alpha partial': { png: L(), jpeg: L(lossy, 'alpha'), 'webp lossless': L(), 'webp lossy': L(lossy), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy, 'premultiplied-alpha', 'transparent-color'), 'jxl lossy': L(lossy, 'premultiplied-alpha', 'transparent-color'), tiff: L() },
+  'avif 10-bit alpha': { png: L(), jpeg: L(lossy, 'bit-depth', 'alpha'), 'webp lossless': L('bit-depth'), 'webp lossy': L(lossy, 'bit-depth'), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy, 'bit-depth', 'premultiplied-alpha', 'transparent-color'), 'jxl lossy': L(lossy, 'bit-depth', 'premultiplied-alpha', 'transparent-color'), tiff: L() },
+  'avif 12-bit': { png: L(), jpeg: L(lossy, 'bit-depth'), 'webp lossless': L('bit-depth'), 'webp lossy': L(lossy, 'bit-depth'), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy, 'bit-depth'), 'jxl lossy': L(lossy, 'bit-depth'), tiff: L() },
+  'jxl 8-bit': { png: L('decoder-unverified'), jpeg: L(lossy, 'decoder-unverified'), 'webp lossless': L('decoder-unverified'), 'webp lossy': L(lossy, 'decoder-unverified'), 'avif lossless': L('decoder-unverified'), 'avif lossy': L(lossy, 'decoder-unverified'), 'jxl lossless': L(lossy, 'decoder-unverified'), 'jxl lossy': L(lossy, 'decoder-unverified'), tiff: L('decoder-unverified') },
+  'jxl unknown depth': { png: L('bit-depth-unknown', 'decoder-unverified'), jpeg: L(lossy, 'bit-depth-unknown', 'decoder-unverified'), 'webp lossless': L('bit-depth-unknown', 'decoder-unverified'), 'webp lossy': L(lossy, 'bit-depth-unknown', 'decoder-unverified'), 'avif lossless': L('bit-depth-unknown', 'decoder-unverified'), 'avif lossy': L(lossy, 'bit-depth-unknown', 'decoder-unverified'), 'jxl lossless': L(lossy, 'bit-depth-unknown', 'decoder-unverified'), 'jxl lossy': L(lossy, 'bit-depth-unknown', 'decoder-unverified'), tiff: L('bit-depth-unknown', 'decoder-unverified') },
+  'tiff rgb16': { png: L(), jpeg: L(lossy, 'bit-depth'), 'webp lossless': L('bit-depth'), 'webp lossy': L(lossy, 'bit-depth'), 'avif lossless': L('bit-depth'), 'avif lossy': L(lossy, 'bit-depth'), 'jxl lossless': L(lossy, 'bit-depth'), 'jxl lossy': L(lossy, 'bit-depth'), tiff: L() },
+  'tiff rgba8 associated alpha': { png: L('associated-alpha'), jpeg: L(lossy, 'alpha', 'associated-alpha'), 'webp lossless': L('associated-alpha'), 'webp lossy': L(lossy, 'associated-alpha'), 'avif lossless': L('associated-alpha'), 'avif lossy': L(lossy, 'associated-alpha'), 'jxl lossless': L(lossy, 'premultiplied-alpha', 'transparent-color', 'associated-alpha'), 'jxl lossy': L(lossy, 'premultiplied-alpha', 'transparent-color', 'associated-alpha'), tiff: L('associated-alpha') },
+};
+
+describe('computeLosses: Phase 3 matrix through verified wasm codecs', () => {
   for (const [sName, source] of Object.entries(sources)) {
     for (const [tName, target] of Object.entries(targets)) {
       it(`${sName} -> ${tName}`, () => {
-        const losses = computeLosses(source, target, caps[target.format]);
+        const losses = computeLosses(source, target, { decoder: DEC[source.format], encoder: ENC[target.format] });
         expect(losses.map((l) => l.kind)).toEqual(expected[sName]![tName]);
-        // Every loss has a human-readable message.
         for (const l of losses) expect(l.message.length).toBeGreaterThan(20);
       });
     }
   }
-
   it('the matrix covers every source and target exactly once', () => {
     expect(Object.keys(expected).sort()).toEqual(Object.keys(sources).sort());
-    for (const row of Object.values(expected)) {
-      expect(Object.keys(row).sort()).toEqual(Object.keys(targets).sort());
+    for (const row of Object.values(expected)) expect(Object.keys(row).sort()).toEqual(Object.keys(targets).sort());
+  });
+});
+
+describe('computeLosses: canvas fallback pipeline (exactAlpha false, 8-bit)', () => {
+  const cv = { decoder: canvasCaps('png'), encoder: canvasCaps('png') };
+  it('RGB under alpha 0 is a PIXELS loss that trips lossless-only', () => {
+    const l = computeLosses(sources['png rgba binary alpha']!, targets.png!, cv);
+    expect(l.map((x) => x.kind)).toEqual(['transparent-color']);
+    expect(l[0]!.severity).toBe('pixels');
+    expect(isPixelLossless(l)).toBe(false);
+  });
+  it('semi-transparent sources list both alpha losses', () => {
+    const l = computeLosses(sources['png rgba partial']!, targets.png!, cv);
+    expect(l.map((x) => x.kind)).toEqual(['premultiplied-alpha', 'transparent-color']);
+  });
+  it('names the side at fault: exact decoder + canvas encoder', () => {
+    const l = computeLosses(sources['png rgba partial']!, targets.png!, { decoder: ENC.png, encoder: canvasCaps('png') });
+    expect(l[0]!.message).toMatch(/^The encoder in use/);
+    const m = computeLosses(sources['png rgba partial']!, targets.png!, { decoder: canvasCaps('png'), encoder: ENC.png });
+    expect(m[0]!.message).toMatch(/^The decoder in use/);
+  });
+  it('16-bit source through an 8-bit decoder is a decoder-side bit-depth loss', () => {
+    const l = computeLosses(sources['png rgb16']!, targets.png!, { decoder: canvasCaps('png'), encoder: ENC.png });
+    expect(l.map((x) => x.kind)).toEqual(['bit-depth']);
+    expect(l[0]!.message).toMatch(/the decoder/);
+    expect(plannedBitDepth(16, { decoder: canvasCaps('png'), encoder: ENC.png })).toBe(8);
+  });
+  it('a lossless target whose encoder failed the lossless probe is flagged lossy', () => {
+    const l = computeLosses(sources['png rgb8']!, targets['webp lossless']!, { decoder: ENC.png, encoder: caps({ lossless: false, exactAlpha: false }) });
+    expect(l.map((x) => x.kind)).toEqual(['pixels-lossy']);
+    expect(l[0]!.message).toMatch(/could not be verified/);
+  });
+});
+
+describe('metadata modes', () => {
+  const s = sources['jpeg exif+gps']!;
+  const withXmp = src('jpeg', { hasExif: true, hasGps: true, hasXmp: true, orientation: 1 });
+  const mode = (metadataMode: TargetSpec['metadataMode'], format: ImageFormat = 'png'): TargetSpec => ({ format, lossless: true, metadataMode, iccMode: 'strip' });
+  const pipe = (format: ImageFormat = 'png') => ({ decoder: DEC.jpeg, encoder: ENC[format] });
+
+  it('strip-all: EXIF and XMP removed', () => {
+    expect(computeLosses(withXmp, mode('strip-all'), pipe()).map((l) => l.kind)).toEqual(['exif', 'xmp']);
+  });
+  it('strip-gps: only GPS goes, orientation is normalised, XMP goes with a reason', () => {
+    const l = computeLosses(s, mode('strip-gps'), pipe());
+    expect(l.map((x) => x.kind)).toEqual(['gps', 'orientation']);
+    expect(l.every((x) => x.severity === 'metadata')).toBe(true);
+    const x = computeLosses(withXmp, mode('strip-gps'), pipe());
+    expect(x.map((y) => y.kind)).toEqual(['gps', 'xmp']);
+    expect(x[1]!.message).toMatch(/location/);
+  });
+  it('preserve: only the orientation tag is altered, and the message says so', () => {
+    const l = computeLosses(s, mode('preserve'), pipe());
+    expect(l.map((x) => x.kind)).toEqual(['orientation']);
+    expect(l[0]!.message).toMatch(/rewritten to 1/);
+    expect(computeLosses(withXmp, mode('preserve'), pipe())).toEqual([]);
+  });
+  it('preserve into a target whose encoder cannot carry EXIF says so (and names GPS)', () => {
+    const l = computeLosses(s, mode('preserve', 'avif'), pipe('avif'));
+    expect(l.map((x) => x.kind)).toEqual(['exif']);
+    expect(l[0]!.message).toMatch(/encoder in use cannot embed/);
+    expect(l[0]!.message).toMatch(/GPS/);
+  });
+  it('GPS-less EXIF in strip-gps mode lists nothing but orientation', () => {
+    const noGps = src('jpeg', { hasExif: true, orientation: 1 });
+    expect(computeLosses(noGps, mode('strip-gps'), pipe())).toEqual([]);
+  });
+});
+
+describe('ICC modes', () => {
+  const matrix = sources['jpeg icc matrix']!;
+  const lut = src('jpeg', { hasIcc: true, iccKind: 'lut' });
+  const t = (iccMode: TargetSpec['iccMode'], format: ImageFormat = 'png'): TargetSpec => ({ format, lossless: true, metadataMode: 'strip-all', iccMode });
+  const pipe = (format: ImageFormat = 'png') => ({ decoder: DEC.jpeg, encoder: ENC[format] });
+
+  it('strip: metadata loss stating values kept, appearance not', () => {
+    const l = computeLosses(matrix, t('strip'), pipe());
+    expect(l.map((x) => x.kind)).toEqual(['icc']);
+    expect(l[0]!.severity).toBe('metadata');
+    expect(l[0]!.message).toMatch(/Values preserved, appearance not/);
+  });
+  it('preserve: nothing lost when the encoder can embed; loss when it cannot', () => {
+    expect(computeLosses(matrix, t('preserve'), pipe())).toEqual([]);
+    const l = computeLosses(matrix, t('preserve', 'avif'), pipe('avif'));
+    expect(l.map((x) => x.kind)).toEqual(['icc']);
+    expect(l[0]!.message).toMatch(/cannot embed/);
+  });
+  it('convert-srgb on a matrix profile: PIXELS loss stating appearance kept, values changed', () => {
+    const l = computeLosses(matrix, t('convert-srgb'), pipe());
+    expect(l.map((x) => x.kind)).toEqual(['icc-convert']);
+    expect(l[0]!.severity).toBe('pixels');
+    expect(l[0]!.message).toMatch(/Appearance is preserved; values change/);
+    expect(isPixelLossless(l)).toBe(false);
+  });
+  it('convert-srgb on a LUT profile is refused, never approximated', () => {
+    const l = computeLosses(lut, t('convert-srgb'), pipe());
+    expect(l.map((x) => x.kind)).toEqual(['icc-convert-unavailable']);
+    expect(l[0]!.message).toMatch(/will not approximate/);
+  });
+  it('a decoder that applies ICC itself reports the conversion regardless of mode', () => {
+    const jxlIcc = src('jxl', { hasIcc: true });
+    for (const m of ['strip', 'preserve', 'convert-srgb'] as const) {
+      const l = computeLosses(jxlIcc, t(m), { decoder: { ...DEC.jxl, decodeExact: true }, encoder: ENC.png });
+      expect(l.map((x) => x.kind)).toEqual(['icc-convert']);
+      expect(l[0]!.message).toMatch(/decoder in use converts/);
     }
   });
-});
-
-describe('computeLosses: browser WITHOUT lossless WebP', () => {
-  const caps = capsWith(false);
-  it('WebP "lossless" target is reported as lossy, with the browser-specific message', () => {
-    const losses = computeLosses(sources['png rgb8']!, targets['webp lossless']!, caps.webp);
-    expect(losses.map((l) => l.kind)).toEqual(['pixels-lossy']);
-    expect(losses[0]!.message).toMatch(/not available in this browser/);
-    expect(isPixelLossless(losses)).toBe(false);
-  });
-  it('PNG is unaffected', () => {
-    expect(computeLosses(sources['png rgb8']!, targets.png!, caps.png)).toEqual([]);
+  it('AVIF rotation properties are a pixel loss', () => {
+    const l = computeLosses(src('avif', { hasTransformProperties: true }), targets.png!, { decoder: DEC.avif, encoder: ENC.png });
+    expect(l.map((x) => x.kind)).toEqual(['transform-properties']);
   });
 });
 
-describe('severity classification', () => {
-  const caps = capsWith(true);
-  it('pixel-lossless allows hidden and metadata losses but not pixel losses', () => {
-    const l1 = computeLosses(sources['jpeg exif+gps']!, targets.png!, caps.png);
-    expect(isPixelLossless(l1)).toBe(true);
-    expect(isFullyLossless(l1)).toBe(false);
-    const l2 = computeLosses(sources['png rgba binary alpha']!, targets.png!, caps.png);
-    expect(isPixelLossless(l2)).toBe(true);
-    expect(l2[0]!.severity).toBe('hidden');
-    const l3 = computeLosses(sources['png rgba partial']!, targets.png!, caps.png);
-    expect(isPixelLossless(l3)).toBe(false);
-    const l4 = computeLosses(sources['png rgb16']!, targets.png!, caps.png);
-    expect(isPixelLossless(l4)).toBe(false);
+describe('helpers', () => {
+  it('needsFlatten reads the encoder alpha capability only', () => {
+    expect(needsFlatten(sources['png rgba partial']!, ENC.jpeg)).toBe(true);
+    expect(needsFlatten(sources['png rgba partial']!, ENC.png)).toBe(false);
+    expect(needsFlatten(sources['png rgb8']!, ENC.jpeg)).toBe(false);
   });
-  it('fully lossless only when the list is empty', () => {
-    expect(isFullyLossless(computeLosses(sources['png rgb8']!, targets.png!, caps.png))).toBe(true);
+  it('plannedBitDepth picks the smallest encoder depth that fits, else the largest', () => {
+    expect(plannedBitDepth(10, { decoder: DEC.avif, encoder: ENC.avif })).toBe(10);
+    expect(plannedBitDepth(16, { decoder: DEC.png, encoder: ENC.avif })).toBe(12);
+    expect(plannedBitDepth(8, { decoder: DEC.png, encoder: ENC.png })).toBe(8);
+    expect(plannedBitDepth(12, { decoder: DEC.avif, encoder: ENC.png })).toBe(16);
   });
-  it('EXIF message names GPS when present', () => {
-    const l = computeLosses(sources['jpeg exif+gps']!, targets.png!, caps.png);
-    expect(l.find((x) => x.kind === 'exif')!.message).toMatch(/GPS/);
-    const m = computeLosses(sources['webp animated exif']!, targets.png!, caps.png);
-    expect(m.find((x) => x.kind === 'exif')!.message).not.toMatch(/GPS/);
-  });
-  it('alpha message distinguishes opaque alpha from real transparency', () => {
-    const opaque = computeLosses(sources['png rgba opaque']!, targets.jpeg!, caps.jpeg);
-    expect(opaque.find((x) => x.kind === 'alpha')!.message).toMatch(/fully opaque/);
-    const partial = computeLosses(sources['png rgba partial']!, targets.jpeg!, caps.jpeg);
-    expect(partial.find((x) => x.kind === 'alpha')!.message).toMatch(/background colour/);
-  });
-});
-
-describe('needsFlatten', () => {
-  const caps = capsWith(true);
-  it('is true only for alpha sources into an alpha-less target', () => {
-    expect(needsFlatten(sources['png rgba opaque']!, caps.jpeg)).toBe(true);
-    expect(needsFlatten(sources['png rgba partial']!, caps.jpeg)).toBe(true);
-    expect(needsFlatten(sources['png rgb8']!, caps.jpeg)).toBe(false);
-    expect(needsFlatten(sources['png rgba partial']!, caps.png)).toBe(false);
-    expect(needsFlatten(sources['png rgba partial']!, caps.webp)).toBe(false);
+  it('isFullyLossless only when the list is empty', () => {
+    expect(isFullyLossless(computeLosses(sources['png rgb8']!, targets.png!, { decoder: DEC.png, encoder: ENC.png }))).toBe(true);
+    expect(isFullyLossless(computeLosses(sources['jpeg exif+gps']!, targets.png!, { decoder: DEC.jpeg, encoder: ENC.png }))).toBe(false);
   });
 });
