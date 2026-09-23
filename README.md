@@ -298,4 +298,19 @@ docs/                      Phase 3 codec survey
 ## Deploy
 
 Static files in `dist/`, built with Vite `base: '/airgap/'` for GitHub Pages at
-`https://<user>.github.io/airgap/`.
+`https://<user>.github.io/airgap/`. Every URL the page emits is derived from
+that base (Vite rewrites the root-relative favicon link, the module script and
+the stylesheet; the worker module URL is resolved from the emitted asset path;
+codec chunks are imported relative to the worker module), so nothing in the
+build assumes a root path.
+
+Two GitHub Actions workflows:
+
+- `.github/workflows/ci.yml` runs on every pull request: typecheck, unit,
+  browser and e2e suites. Playwright's Chromium is cached keyed on the exact
+  Playwright version in the lockfile, so the browser download only recurs on
+  upgrade; OS dependencies are installed every run.
+- `.github/workflows/deploy.yml` runs on push to `main`: it calls the same
+  test workflow, and only if that job succeeds does the deploy job build
+  `dist/` and publish it with `actions/deploy-pages`. In the repository
+  settings, Pages must be set to "GitHub Actions" as the source.
