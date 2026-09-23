@@ -56,6 +56,10 @@ export interface ImageMetadata {
   hasSemiTransparency: boolean;
   hasExif: boolean;
   hasGps: boolean;
+  /** EXIF carries a MakerNote blob (opaque, may hold location). */
+  hasMakerNote?: boolean;
+  /** EXIF carries an IFD1 thumbnail with its own metadata segments. */
+  thumbnailHasMetadata?: boolean;
   hasIcc: boolean;
   hasXmp: boolean;
   /** Parsed ICC facts, when the profile bytes were extracted. */

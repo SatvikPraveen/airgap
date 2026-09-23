@@ -4,6 +4,7 @@
  */
 import { expect, test } from '@playwright/test';
 import exifr from 'exifr';
+import * as P from '../fixtures/pattern.mjs';
 import { convertAndDownload, decodePngNode, fixture, openApp, pickFixture, pngChunkTypes, selectTarget } from './helpers';
 
 const parse = async (bytes: Buffer) =>
@@ -43,6 +44,23 @@ test('strip GPS only: GPS tags gone, camera and timestamps intact, PNG eXIf chun
   expect(t['DateTimeOriginal']).toBe('2026:09:23 09:59:59');
   expect(Object.keys(t).filter((k) => k.startsWith('GPS'))).toEqual([]);
   await expect(page.getByTestId('metadata-check')).toContainText('EXIF kept, GPS removed');
+});
+
+test('strip GPS only on a file with location in GPS IFD, MakerNote, XMP and thumbnail EXIF: panel names each, output has no coordinates', async ({ page }) => {
+  await pickFixture(page, 'location-everywhere.jpg');
+  await expect(page.locator('[data-fact="exif"]')).toContainText('MakerNote');
+  await selectTarget(page, 'jpeg');
+  await page.getByTestId('meta-strip-gps').check();
+  await expect(page.locator('[data-loss="gps"]')).toBeVisible();
+  await expect(page.locator('[data-loss="makernote"]')).toContainText('cannot be cleaned selectively');
+  await expect(page.locator('[data-loss="thumbnail-metadata"]')).toBeVisible();
+  await expect(page.locator('[data-loss="xmp"]')).toContainText('location');
+  const { bytes } = await convertAndDownload(page);
+  expect(P.findLocationNeedles(bytes)).toEqual([]);
+  const t = await parse(bytes);
+  expect(t['Make']).toBe('Airgap Fixtures');
+  expect(Object.keys(t).filter((k) => k.startsWith('GPS'))).toEqual([]);
+  expect(P.findLocationNeedles(fixture('location-everywhere.jpg')).length).toBeGreaterThan(0); // the scan works
 });
 
 test('strip all (default): nothing parseable remains', async ({ page }) => {

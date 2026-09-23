@@ -2,7 +2,9 @@
  * EXIF payload operations on the TIFF-structured blob that JPEG APP1, PNG
  * eXIf, WebP EXIF and TIFF ExifIFD all share. Pure.
  */
+import { injectMetadata } from './containers';
 import {
+  entryLong,
   entryShort,
   findEntry,
   parseTiffStructure,
@@ -26,6 +28,10 @@ export interface ExifSummary {
   ifd1: number[];
   hasGps: boolean;
   hasThumbnail: boolean;
+  /** Exif IFD tag 0x927c present: an opaque vendor blob that may carry location. */
+  hasMakerNote: boolean;
+  /** The IFD1 thumbnail JPEG carries its own EXIF/XMP/ICC segments. */
+  thumbnailHasMetadata: boolean;
   orientation?: number;
   make?: string;
   model?: string;
@@ -61,6 +67,8 @@ export function summarizeExif(tiff: Uint8Array): ExifSummary {
     ifd1: tags(ifd1),
     hasGps: !!gps,
     hasThumbnail: !!(ifd1 && findEntry(ifd1, TAG.JPEGInterchangeFormat)?.blob),
+    hasMakerNote: !!(exif && findEntry(exif, TAG.MakerNote)),
+    thumbnailHasMetadata: thumbnailHasMetadata(ifd1),
   };
   const o = findEntry(ifd0, TAG.Orientation);
   if (o) out.orientation = readNumber(o, s.littleEndian);
@@ -79,11 +87,64 @@ export function summarizeExif(tiff: Uint8Array): ExifSummary {
   return out;
 }
 
-/** Removes the GPS IFD (and its pointer) and nothing else. Returns a re-serialised blob. */
+function thumbnailHasMetadata(ifd1: Ifd | undefined): boolean {
+  const blob = ifd1 && findEntry(ifd1, TAG.JPEGInterchangeFormat)?.blob;
+  if (!blob) return false;
+  try {
+    const h = inspectJpegSegments(blob);
+    return h.exif || h.xmp || h.icc;
+  } catch {
+    return false;
+  }
+}
+
+/** Cheap segment scan of a JPEG for APP1 Exif/XMP and APP2 ICC, without decoding. */
+function inspectJpegSegments(b: Uint8Array): { exif: boolean; xmp: boolean; icc: boolean } {
+  const out = { exif: false, xmp: false, icc: false };
+  if (!(b[0] === 0xff && b[1] === 0xd8)) throw new Error('not a JPEG');
+  let off = 2;
+  while (off + 4 <= b.length && b[off] === 0xff) {
+    const marker = b[off + 1]!;
+    if (marker === 0xda || marker === 0xd9) break;
+    const len = (b[off + 2]! << 8) | b[off + 3]!;
+    const head = String.fromCharCode(...b.subarray(off + 4, off + 4 + Math.min(12, len - 2)));
+    if (marker === 0xe1 && head.startsWith('Exif\0\0')) out.exif = true;
+    else if (marker === 0xe1 && head.startsWith('http://ns.ad')) out.xmp = true;
+    else if (marker === 0xe2 && head.startsWith('ICC_PROFILE')) out.icc = true;
+    off += 2 + len;
+  }
+  return out;
+}
+
+/**
+ * "Strip GPS only": removes every place inside EXIF where location can live,
+ * keeping everything else.
+ *  - the GPS IFD and its pointer (IFD0 and IFD1)
+ *  - the MakerNote (0x927c): an opaque vendor blob that cannot be cleaned
+ *    selectively, so it is dropped whole
+ *  - EXIF/XMP/ICC segments inside the IFD1 thumbnail JPEG (the thumbnail
+ *    pixels stay); if the thumbnail cannot be rewritten it is dropped
+ * XMP is handled by the caller (dropped in this mode). Returns a re-serialised blob.
+ */
 export function stripGps(tiff: Uint8Array): Uint8Array {
   const s = parseExif(tiff);
-  removeEntry(s.ifd0, TAG.GpsIFD);
-  if (s.ifd0.next) removeEntry(s.ifd0.next, TAG.GpsIFD);
+  for (const ifd of [s.ifd0, s.ifd0.next]) {
+    if (!ifd) continue;
+    removeEntry(ifd, TAG.GpsIFD);
+    const exif = findEntry(ifd, TAG.ExifIFD)?.sub;
+    if (exif) removeEntry(exif, TAG.MakerNote);
+  }
+  const ifd1 = s.ifd0.next;
+  const thumb = ifd1 && findEntry(ifd1, TAG.JPEGInterchangeFormat);
+  if (ifd1 && thumb?.blob && thumbnailHasMetadata(ifd1)) {
+    try {
+      thumb.blob = injectMetadata(thumb.blob, 'jpeg', {});
+      setEntry(ifd1, entryLong(s.littleEndian, TAG.JPEGInterchangeFormatLength, [thumb.blob.length]));
+    } catch {
+      removeEntry(ifd1, TAG.JPEGInterchangeFormat);
+      removeEntry(ifd1, TAG.JPEGInterchangeFormatLength);
+    }
+  }
   return serializeExif(s);
 }
 
@@ -130,6 +191,7 @@ export const TAG_NAMES: Record<number, string> = {
   0x8827: 'ISOSpeedRatings',
   0x9003: 'DateTimeOriginal',
   0x9004: 'DateTimeDigitized',
+  0x927c: 'MakerNote',
   0xa002: 'PixelXDimension',
   0xa003: 'PixelYDimension',
   0xa005: 'InteropIFD',

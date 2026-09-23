@@ -93,3 +93,61 @@ export function p3Pixel(x, y) {
   const i = Math.floor(x / 2) % P3_PATCHES.length;
   return P3_PATCHES[i];
 }
+
+/**
+ * One location, written into every place metadata can hide it. The raw-byte
+ * needles below are what a "strip GPS only" output must never contain.
+ */
+export const LOCATION = {
+  lat: [[28, 1], [3, 1], [3132, 100]], // 28 deg 3' 31.32" N
+  lon: [[82, 1], [24, 1], [5004, 100]], // 82 deg 24' 50.04" W
+  decimalLat: '28.058700',
+  decimalLon: '-82.413900',
+  xmpLat: '28,3.522N',
+  xmpLon: '82,24.834W',
+  makerAscii: 'GEO lat=28.058700 lon=-82.413900',
+};
+
+/** Byte patterns that identify the coordinates regardless of container. */
+export function locationNeedles() {
+  const enc = (s) => Array.from(new TextEncoder().encode(s));
+  const rat = (pairs, le) => {
+    const out = [];
+    for (const [n, d] of pairs) {
+      const b = new Uint8Array(8);
+      const dv = new DataView(b.buffer);
+      dv.setUint32(0, n, le);
+      dv.setUint32(4, d, le);
+      out.push(Array.from(b));
+    }
+    return out;
+  };
+  return [
+    { name: 'decimal latitude text', bytes: enc(LOCATION.decimalLat) },
+    { name: 'decimal longitude text', bytes: enc(LOCATION.decimalLon) },
+    { name: 'XMP latitude text', bytes: enc(LOCATION.xmpLat) },
+    { name: 'XMP longitude text', bytes: enc(LOCATION.xmpLon) },
+    { name: 'maker note text', bytes: enc(LOCATION.makerAscii) },
+    { name: 'lat seconds rational BE', bytes: rat([LOCATION.lat[2]], false)[0] },
+    { name: 'lat seconds rational LE', bytes: rat([LOCATION.lat[2]], true)[0] },
+    { name: 'lon seconds rational BE', bytes: rat([LOCATION.lon[2]], false)[0] },
+    { name: 'lon seconds rational LE', bytes: rat([LOCATION.lon[2]], true)[0] },
+    { name: 'lat DMS rationals BE (24 bytes)', bytes: rat(LOCATION.lat, false).flat() },
+    { name: 'lat DMS rationals LE (24 bytes)', bytes: rat(LOCATION.lat, true).flat() },
+    { name: 'lon DMS rationals BE (24 bytes)', bytes: rat(LOCATION.lon, false).flat() },
+    { name: 'lon DMS rationals LE (24 bytes)', bytes: rat(LOCATION.lon, true).flat() },
+  ];
+}
+
+/** Indices of every needle found in `bytes`, by name. */
+export function findLocationNeedles(bytes) {
+  const hits = [];
+  for (const n of locationNeedles()) {
+    outer: for (let i = 0; i + n.bytes.length <= bytes.length; i++) {
+      for (let k = 0; k < n.bytes.length; k++) if (bytes[i + k] !== n.bytes[k]) continue outer;
+      hits.push(`${n.name}@${i}`);
+      break;
+    }
+  }
+  return hits;
+}

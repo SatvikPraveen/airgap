@@ -26,7 +26,7 @@ export function renderSource(src: LoadedSource): HTMLElement {
       !m.hasExif
         ? 'none'
         : ex
-          ? `${ex.tagCount} tags${ex.make || ex.model ? ` · ${[ex.make, ex.model].filter(Boolean).join(' ')}` : ''}${ex.dateTime ? ` · ${ex.dateTime}` : ''}${m.hasGps ? ' · includes GPS location' : ''}`
+          ? `${ex.tagCount} tags${ex.make || ex.model ? ` · ${[ex.make, ex.model].filter(Boolean).join(' ')}` : ''}${ex.dateTime ? ` · ${ex.dateTime}` : ''}${m.hasGps ? ' · includes GPS location' : ''}${ex.hasMakerNote ? ' · MakerNote' : ''}${ex.hasThumbnail ? ' · thumbnail' : ''}`
           : m.hasGps
             ? 'present, includes GPS location'
             : 'present',

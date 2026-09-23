@@ -14,3 +14,6 @@ export const P3_PATCHES: [number, number, number][];
 export function rgba16Pixel(x: number, y: number): [number, number, number, number];
 export function quadrantPixel(x: number, y: number): [number, number, number];
 export function p3Pixel(x: number, y: number): [number, number, number];
+export const LOCATION: { lat: [number, number][]; lon: [number, number][]; decimalLat: string; decimalLon: string; xmpLat: string; xmpLon: string; makerAscii: string };
+export function locationNeedles(): { name: string; bytes: number[] }[];
+export function findLocationNeedles(bytes: ArrayLike<number>): string[];

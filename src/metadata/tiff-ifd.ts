@@ -52,6 +52,7 @@ export const TAG = {
   XMP: 0x02bc,
   Copyright: 0x8298,
   ExifIFD: 0x8769,
+  MakerNote: 0x927c,
   IccProfile: 0x8773,
   GpsIFD: 0x8825,
   InteropIFD: 0xa005,

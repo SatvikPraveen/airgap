@@ -58,6 +58,8 @@ async function load(id: number, buffer: ArrayBuffer): Promise<void> {
   if (exif) {
     try {
       info.exifSummary = summarizeExif(exif);
+      info.metadata.hasMakerNote = info.exifSummary.hasMakerNote;
+      info.metadata.thumbnailHasMetadata = info.exifSummary.thumbnailHasMetadata;
     } catch {
       /* unreadable EXIF: facts from the header still stand */
     }

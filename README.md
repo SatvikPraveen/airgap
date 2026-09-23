@@ -127,10 +127,9 @@ RGBA tuple without skipping alpha-0 regions.
 **EXIF / XMP**, defaulting to strip all:
 
 - *Strip all*: EXIF and XMP removed.
-- *Strip GPS only*: the GPS IFD is removed from EXIF and nothing else is
-  touched (asserted on parsed tags by exifr, an independent reader). XMP is
-  removed too, because it can carry location and Airgap does not edit XMP
-  selectively.
+- *Strip GPS only*: removes every place inside the file's metadata where a
+  location can live, and keeps the rest. See "What strip GPS only guarantees"
+  below for the exact contract.
 - *Preserve all*: EXIF and XMP carried through byte-for-byte, with **one
   exception that the loss panel states**: Airgap stores pixels upright, so a
   carried EXIF Orientation tag is rewritten to 1. Carrying the original tag
@@ -146,6 +145,47 @@ RGBA tuple without skipping alpha-0 regions.
   Only matrix/TRC profiles (sRGB, Display P3, Adobe RGB, ProPhoto and the
   like) are converted. On a LUT-based profile the option is **disabled with
   the reason shown**; Airgap never approximates a LUT with the matrix path.
+
+### What "strip GPS only" guarantees, and what it does not
+
+It removes, from the metadata Airgap carries into the output:
+
+1. the EXIF **GPS IFD** (and its pointer, in IFD0 and IFD1);
+2. the EXIF **MakerNote** (tag 0x927c), dropped whole. It is an opaque vendor
+   blob that routinely contains location and cannot be cleaned selectively;
+   the loss panel says so when one is present;
+3. any EXIF, XMP or ICC segments inside the **embedded thumbnail** JPEG (the
+   thumbnail picture itself is kept). If the thumbnail cannot be rewritten it
+   is dropped;
+4. **XMP** entirely, because XMP can carry `exif:GPS*` and free-text fields
+   and Airgap does not edit XMP selectively.
+
+Every other EXIF tag (camera make and model, timestamps, exposure settings,
+resolution, the Exif and Interop sub-IFDs, the Orientation tag normalised to
+1) is carried unchanged. The ICC profile follows the separate ICC choice.
+
+This is verified on real outputs, not on parsed tags: the fixture
+`location-everywhere.jpg` hides one coordinate in the GPS IFD, in a MakerNote,
+in XMP and in the thumbnail's own EXIF; after strip-GPS-only into JPEG, PNG,
+WebP, TIFF, AVIF and JPEG XL, a raw byte scan for the coordinate values (as
+decimal text, as XMP text, and as EXIF rationals in both byte orders) finds
+nothing, while "preserve" into the same containers demonstrably puts them
+back (`tests/browser/strip-gps.test.ts`, `tests/e2e/metadata.spec.ts`).
+
+It does **not** guarantee:
+
+- that a location typed into a free-text EXIF field survives removal: fields
+  such as `ImageDescription`, `UserComment`, `Artist` or `Copyright` are kept
+  as-is, because they are not location fields and Airgap does not guess at
+  their contents;
+- anything about the pixels: a photo of a street sign is still a photo of a
+  street sign, and steganographic or watermarked location data is untouched;
+- anything about metadata Airgap never carries in the first place (PNG `tEXt`
+  chunks, JPEG comment segments, proprietary APP segments): those are dropped
+  in every mode, which is why they cannot leak, but "strip GPS only" is not
+  what removes them.
+
+If you need certainty, use "strip all".
 
 Which targets can carry what: PNG, JPEG, WebP and TIFF carry EXIF, ICC and
 XMP (verified by the probe: what goes in must come back out). AVIF and

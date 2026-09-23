@@ -195,7 +195,34 @@ function buildTiff(entries, { header = true } = {}) {
   return Buffer.concat([head, ...parts]);
 }
 
-function exifEntries({ orientation = 1, gps = true } = {}) {
+/** MakerNote: vendor header, ASCII coordinates, then the same coordinates as raw rationals. */
+function makerNoteBlob() {
+  const rat = Buffer.alloc(48);
+  [...P.LOCATION.lat, ...P.LOCATION.lon].forEach(([n, d], i) => {
+    rat.writeUInt32BE(n, i * 8);
+    rat.writeUInt32BE(d, i * 8 + 4);
+  });
+  return Buffer.concat([Buffer.from('AIRGAPCAM\0', 'ascii'), Buffer.from(P.LOCATION.makerAscii + '\0', 'ascii'), rat]);
+}
+
+function xmpWithLocation() {
+  return Buffer.from(
+    `<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/" exif:GPSLatitude="${P.LOCATION.xmpLat}" exif:GPSLongitude="${P.LOCATION.xmpLon}" exif:GPSAltitude="12/1"><dc:description>${P.LOCATION.decimalLat}, ${P.LOCATION.decimalLon}</dc:description></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`,
+    'utf8',
+  );
+}
+
+function jpegApp1Xmp(xmp) {
+  const payload = Buffer.concat([Buffer.from('http://ns.adobe.com/xap/1.0/\0', 'ascii'), xmp]);
+  const seg = Buffer.alloc(4 + payload.length);
+  seg[0] = 0xff;
+  seg[1] = 0xe1;
+  seg.writeUInt16BE(payload.length + 2, 2);
+  payload.copy(seg, 4);
+  return seg;
+}
+
+function exifEntries({ orientation = 1, gps = true, makerNote = false } = {}) {
   const e = [
     { tag: 0x010f, type: T.ASCII, values: 'Airgap Fixtures' },
     { tag: 0x0110, type: T.ASCII, values: 'Synthetic Camera 1' },
@@ -213,6 +240,7 @@ function exifEntries({ orientation = 1, gps = true } = {}) {
         { tag: 0x9003, type: T.ASCII, values: '2026:09:23 09:59:59' },
         { tag: 0xa002, type: T.LONG, values: [64] },
         { tag: 0xa003, type: T.LONG, values: [48] },
+        ...(makerNote ? [{ tag: 0x927c, type: T.UNDEFINED, values: makerNoteBlob() }] : []),
       ],
     },
   ];
@@ -229,6 +257,33 @@ function exifEntries({ orientation = 1, gps = true } = {}) {
     });
   }
   return e;
+}
+
+/** TIFF with IFD0 + IFD1 (thumbnail JPEG that itself carries an EXIF GPS segment). */
+function buildTiffWithThumbnail(entries, thumbJpeg) {
+  const main = buildTiff(entries);
+  // Append IFD1 by hand: rewrite IFD0's next pointer to a new directory after the data.
+  const dirCount = main.readUInt16BE(8);
+  const nextPtrAt = 8 + 2 + dirCount * 12;
+  let cursor = main.length + (main.length % 2);
+  const ifd1Off = cursor;
+  const ifd1 = Buffer.alloc(2 + 3 * 12 + 4);
+  ifd1.writeUInt16BE(3, 0);
+  const thumbOff = ifd1Off + ifd1.length;
+  const e = (i, tag, type, count, value) => {
+    const at = 2 + i * 12;
+    ifd1.writeUInt16BE(tag, at);
+    ifd1.writeUInt16BE(type, at + 2);
+    ifd1.writeUInt32BE(count, at + 4);
+    ifd1.writeUInt32BE(value, at + 8);
+  };
+  e(0, 0x0103, T.SHORT, 1, 6 << 16); // Compression = 6 (JPEG), SHORT left-justified
+  e(1, 0x0201, T.LONG, 1, thumbOff);
+  e(2, 0x0202, T.LONG, 1, thumbJpeg.length);
+  ifd1.writeUInt32BE(0, 2 + 3 * 12);
+  const out = Buffer.concat([main, Buffer.alloc(main.length % 2), ifd1, thumbJpeg]);
+  out.writeUInt32BE(ifd1Off, nextPtrAt);
+  return out;
 }
 
 function jpegApp1Exif(tiff) {
@@ -420,6 +475,15 @@ write('rgba16.png', png16(P.RGBA16, 6, (x, y) => P.rgba16Pixel(x, y)));
   const rgba = raster8(P.EXIF_GPS, (x, y) => P.rgb8Pixel(x, y, noise));
   write('exif-gps.jpg', jpegWithSegments(rgba, P.EXIF_GPS, [jpegApp1Exif(buildTiff(exifEntries({ orientation: 1 })))]));
   write('icc-lut.jpg', jpegWithSegments(rgba, P.EXIF_GPS, [jpegApp2Icc(lutIcc())]));
+}
+{
+  // location-everywhere.jpg: GPS IFD + MakerNote + XMP + thumbnail with its own EXIF GPS.
+  const noise = P.lcg(3);
+  const rgba = raster8(P.EXIF_GPS, (x, y) => P.rgb8Pixel(x, y, noise));
+  const thumbRaster = raster8({ width: 16, height: 12 }, (x, y) => P.rgb8Pixel(x * 4, y * 4, noise));
+  const thumb = jpegWithSegments(thumbRaster, { width: 16, height: 12 }, [jpegApp1Exif(buildTiff(exifEntries({ gps: true })))]);
+  const tiff = buildTiffWithThumbnail(exifEntries({ gps: true, makerNote: true }), thumb);
+  write('location-everywhere.jpg', jpegWithSegments(rgba, P.EXIF_GPS, [jpegApp1Exif(tiff), jpegApp1Xmp(xmpWithLocation())]));
 }
 {
   const rgba = raster8(P.ORIENT, (x, y) => P.quadrantPixel(x, y));

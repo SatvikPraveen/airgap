@@ -45,6 +45,8 @@ export type LossKind =
   | 'icc-convert-unavailable' // convert requested but profile kind is not matrix/TRC
   | 'exif' // EXIF removed (by choice or because the target cannot carry it)
   | 'gps' // GPS IFD removed on purpose
+  | 'makernote' // MakerNote dropped whole in strip-gps mode (cannot be cleaned selectively)
+  | 'thumbnail-metadata' // metadata inside the embedded thumbnail removed in strip-gps mode
   | 'orientation' // EXIF Orientation tag rewritten to 1 (pixels stored upright)
   | 'icc' // ICC profile removed (by choice or because the target cannot carry it)
   | 'xmp'; // XMP removed
@@ -220,12 +222,28 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
         message: `EXIF metadata will be removed because the ${name} encoder in use cannot embed it${m.hasGps ? ' (this includes the GPS location)' : ''}.`,
       });
     } else {
-      if (target.metadataMode === 'strip-gps' && m.hasGps) {
-        losses.push({
-          kind: 'gps',
-          severity: 'metadata',
-          message: 'The GPS location will be removed from EXIF. Every other EXIF tag (camera, timestamps, settings) is kept.',
-        });
+      if (target.metadataMode === 'strip-gps') {
+        if (m.hasGps) {
+          losses.push({
+            kind: 'gps',
+            severity: 'metadata',
+            message: 'The GPS location will be removed from EXIF. Every other EXIF tag (camera, timestamps, settings) is kept.',
+          });
+        }
+        if (m.hasMakerNote) {
+          losses.push({
+            kind: 'makernote',
+            severity: 'metadata',
+            message: 'The MakerNote block will be removed whole. It is an opaque vendor blob that can carry location data and cannot be cleaned selectively.',
+          });
+        }
+        if (m.thumbnailHasMetadata) {
+          losses.push({
+            kind: 'thumbnail-metadata',
+            severity: 'metadata',
+            message: 'The embedded thumbnail carries its own EXIF/XMP/ICC segments; those are removed (the thumbnail image itself is kept).',
+          });
+        }
       }
       if (m.orientation !== undefined && m.orientation !== 1) {
         losses.push({
