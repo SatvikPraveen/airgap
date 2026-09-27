@@ -83,6 +83,33 @@ export function comparePixels(a: PixelData, b: PixelData): PixelComparison {
   return { identical: differingPixels === 0, differingPixels, differingVisiblePixels, maxChannelDiff };
 }
 
+/**
+ * Per-pixel change magnitude for the heat map: 0 where identical, otherwise the largest
+ * channel difference scaled to 1..255 (never rounded down to 0 at 16-bit). Same size rule as
+ * comparePixels: mismatched geometry yields an all-255 mask.
+ */
+export function diffMask(a: PixelData, b: PixelData): Uint8Array {
+  const n = a.width * a.height;
+  const out = new Uint8Array(n);
+  if (a.width !== b.width || a.height !== b.height || a.bitDepth !== b.bitDepth) {
+    out.fill(255);
+    return out;
+  }
+  const scale = 255 / maxValue(a.bitDepth);
+  const pa = a.data;
+  const pb = b.data;
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    let m = 0;
+    for (let c = 0; c < 4; c++) {
+      const d = Math.abs(pa[i + c]! - pb[i + c]!);
+      if (d > m) m = d;
+    }
+    if (m > 0) out[p] = Math.max(1, Math.min(255, Math.round(m * scale)));
+  }
+  return out;
+}
+
 /** Deterministic test/probe image: opaque noise plus every kind of alpha, with non-zero RGB under alpha 0. */
 export function probeImage(size: number, bitDepth: number, withAlpha: boolean, seed = 0x2f6e2b1): PixelData {
   const px = allocate(size, size, bitDepth);

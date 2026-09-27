@@ -18,6 +18,7 @@ export interface ConvertedMessage {
   encoderId: string;
   colorLayout?: string;
   verification: Verification;
+  diffMask?: Uint8Array;
 }
 
 export class WorkerCancelledError extends Error {
@@ -127,7 +128,16 @@ export class WorkerClient {
   async convert(id: number, plan: ConversionPlan): Promise<ConvertedMessage> {
     const m = await this.send({ type: 'convert', id, plan }, `id:${id}`);
     if (m.type !== 'converted') throw new Error('unexpected worker reply');
-    return { bytes: m.bytes, mime: m.mime, format: m.format, bitDepth: m.bitDepth, encoderId: m.encoderId, ...(m.colorLayout && { colorLayout: m.colorLayout }), verification: m.verification };
+    return {
+      bytes: m.bytes,
+      mime: m.mime,
+      format: m.format,
+      bitDepth: m.bitDepth,
+      encoderId: m.encoderId,
+      ...(m.colorLayout && { colorLayout: m.colorLayout }),
+      verification: m.verification,
+      ...(m.diffMask && { diffMask: new Uint8Array(m.diffMask) }),
+    };
   }
 
   unload(id: number): void {

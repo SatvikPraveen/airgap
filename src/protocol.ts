@@ -2,6 +2,7 @@
 import type { CapabilityTable, ImageFormat, ImageMetadata, ResolvedCodec } from './codecs/types';
 import type { ConversionPlan, Verification } from './convert';
 import type { ExifSummary } from './metadata/exif';
+import type { ExifTagRow } from './metadata/exif-list';
 
 export interface SourceInfo {
   format: ImageFormat;
@@ -10,6 +11,12 @@ export interface SourceInfo {
   /** Payload bytes are stripped; only facts travel to the UI. */
   metadata: Omit<ImageMetadata, 'exif' | 'icc' | 'xmp'>;
   exifSummary?: ExifSummary;
+  /** Every EXIF tag, for the inspector. Absent when there is no EXIF or it cannot be parsed. */
+  exifTags?: ExifTagRow[];
+  /** XMP packet as text, truncated for display. */
+  xmpText?: string;
+  xmpBytes?: number;
+  xmpTruncated?: boolean;
   /** Which decoder actually read this file (after per-file fallback). */
   decoder: ResolvedCodec;
 }
@@ -35,6 +42,8 @@ export type FromWorker =
       encoderId: string;
       colorLayout?: string;
       verification: Verification;
+      /** width*height bytes; present only when the output is not identical. Transferred. */
+      diffMask?: ArrayBuffer;
       caps: CapabilityTable;
     }
   | { type: 'error'; id: number | null; message: string; name: string };

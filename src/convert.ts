@@ -10,7 +10,7 @@ import { inspect } from './inspect';
 import { setOrientation, stripGps, normalizeExif } from './metadata/exif';
 import { convertToSrgb, parseIcc } from './metadata/icc';
 import { applyOrientation } from './orientation';
-import { comparePixels, convertBitDepth, type PixelComparison } from './pixels';
+import { comparePixels, convertBitDepth, diffMask, type PixelComparison } from './pixels';
 
 export interface ConversionPlan {
   target: TargetSpec;
@@ -43,6 +43,8 @@ export interface ConversionResult {
   /** How the container stores the samples (re-read from the output header), when the format exposes it. */
   colorLayout?: string;
   verification: Verification;
+  /** width*height bytes, change magnitude per pixel (0 = identical). Only when the output is not identical. */
+  diffMask?: Uint8Array;
 }
 
 export class FlattenRequiredError extends Error {
@@ -127,7 +129,10 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   // 5. Verify pixels by decoding what we just produced.
   const back = await p.verifier.decode(bytes);
   const depth = Math.min(outDepth, back.pixels.bitDepth);
-  const cmp = comparePixels(convertBitDepth(pixels, depth), convertBitDepth(back.pixels, depth));
+  const expected = convertBitDepth(pixels, depth);
+  const actual = convertBitDepth(back.pixels, depth);
+  const cmp = comparePixels(expected, actual);
+  const mask = cmp.identical ? undefined : diffMask(expected, actual);
 
   // 6. Verify metadata by re-reading the container header.
   const h = inspect(bytes).metadata;
@@ -154,7 +159,7 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   };
   verification.metadataOk = !Object.values(verification.metadata).includes('unexpected');
 
-  return { bytes, mime: MIME[target.format], format: target.format, bitDepth: outDepth, encoderId: p.encoder.id, ...(h.colorLayout && { colorLayout: h.colorLayout }), verification };
+  return { bytes, mime: MIME[target.format], format: target.format, bitDepth: outDepth, encoderId: p.encoder.id, ...(h.colorLayout && { colorLayout: h.colorLayout }), verification, ...(mask && { diffMask: mask }) };
 }
 
 function clampQuality(q: number | undefined): number {

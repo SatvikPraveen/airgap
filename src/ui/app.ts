@@ -9,6 +9,7 @@ import { parseHexColor } from '../flatten';
 import { clear, h } from './dom';
 import { createDropzone } from './dropzone';
 import { renderLosses } from './lossPanel';
+import { renderMetadataPanel } from './metadataPanel';
 import { renderResult } from './resultPanel';
 import { renderSource } from './sourcePanel';
 import { initialState, TARGET_ORDER, TARGETS, type AppState, type TargetKey } from './state';
@@ -49,6 +50,7 @@ export function mountApp(root: HTMLElement): void {
   const errorBox = h('div', { class: 'error', role: 'alert', 'data-testid': 'error', hidden: true });
   const dropzone = createDropzone((f) => void loadFile(f));
   const sourceHost = h('div', { 'data-testid': 'source-panel' });
+  const metadataHost = h('div');
   const targetSelect = h('select', { 'data-testid': 'target', 'aria-label': 'Target format' });
   const targetNote = h('div', { class: 'hint', 'data-testid': 'target-note' });
   const losslessOnly = h('input', { type: 'checkbox', 'data-testid': 'lossless-only' });
@@ -163,7 +165,7 @@ export function mountApp(root: HTMLElement): void {
       '), for the page and for its worker. Verify it yourself in the DevTools Network tab.',
     ),
     errorBox,
-    h('section', { class: 'panel' }, h('h2', {}, '1. Source'), dropzone, sourceHost, noticeBox),
+    h('section', { class: 'panel' }, h('h2', {}, '1. Source'), dropzone, sourceHost, noticeBox, metadataHost),
     h(
       'section',
       { class: 'panel' },
@@ -347,6 +349,17 @@ export function mountApp(root: HTMLElement): void {
 
     clear(sourceHost);
     if (src) sourceHost.append(renderSource(src));
+    clear(metadataHost);
+    if (src) {
+      const panel = renderMetadataPanel({
+        info: src.info,
+        mode: state.metadataMode,
+        encoderCarriesExif: enc ? enc.metadata.exif : undefined,
+        open: state.inspectorOpen,
+        onToggle: (open) => (state.inspectorOpen = open),
+      });
+      if (panel) metadataHost.append(panel);
+    }
 
     clear(lossHost);
     const losses = targetLosses(state.target);
@@ -444,6 +457,10 @@ export function mountApp(root: HTMLElement): void {
         verification: out.verification,
         target: state.target,
         pixelCount: src.info.width * src.info.height,
+        width: src.info.width,
+        height: src.info.height,
+        ...(out.diffMask && { diffMask: out.diffMask }),
+        sourceUrl: src.previewUrl,
       };
     } catch (err) {
       if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;

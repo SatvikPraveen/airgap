@@ -9,11 +9,14 @@ import type { DecodedImage, ImageFormat } from './codecs/types';
 import { convert, prepareSource } from './convert';
 import { sniffFormat, UnsupportedFormatError } from './inspect';
 import { summarizeExif } from './metadata/exif';
+import { listExifTags } from './metadata/exif-list';
 import type { FromWorker, SourceInfo, ToWorker } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
 
 const registry = new CodecRegistry();
+/** XMP is shown as text in the inspector; cap what travels to the UI. */
+const XMP_DISPLAY_LIMIT = 16 * 1024;
 const images = new Map<number, { decoded: DecodedImage; format: ImageFormat }>();
 
 function post(msg: FromWorker, transfer: Transferable[] = []): void {
@@ -47,7 +50,6 @@ async function load(id: number, buffer: ArrayBuffer): Promise<void> {
   images.set(id, { decoded, format });
   const { exif, icc, xmp, ...facts } = decoded.metadata;
   void icc;
-  void xmp;
   const info: SourceInfo = {
     format,
     width: decoded.pixels.width,
@@ -60,9 +62,18 @@ async function load(id: number, buffer: ArrayBuffer): Promise<void> {
       info.exifSummary = summarizeExif(exif);
       info.metadata.hasMakerNote = info.exifSummary.hasMakerNote;
       info.metadata.thumbnailHasMetadata = info.exifSummary.thumbnailHasMetadata;
+      info.exifTags = listExifTags(exif);
     } catch {
       /* unreadable EXIF: facts from the header still stand */
     }
+  }
+  if (xmp) {
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(xmp);
+    info.xmpBytes = xmp.length;
+    if (text.length > XMP_DISPLAY_LIMIT) {
+      info.xmpText = text.slice(0, XMP_DISPLAY_LIMIT);
+      info.xmpTruncated = true;
+    } else info.xmpText = text;
   }
   post({ type: 'loaded', id, info, caps: registry.table() });
 }
@@ -80,6 +91,7 @@ async function doConvert(id: number, plan: Parameters<typeof convert>[3]): Promi
     plan,
   );
   const buffer = result.bytes.buffer.slice(result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength) as ArrayBuffer;
+  const mask = result.diffMask ? (result.diffMask.buffer.slice(result.diffMask.byteOffset, result.diffMask.byteOffset + result.diffMask.byteLength) as ArrayBuffer) : undefined;
   post(
     {
       type: 'converted',
@@ -91,9 +103,10 @@ async function doConvert(id: number, plan: Parameters<typeof convert>[3]): Promi
       encoderId: result.encoderId,
       ...(result.colorLayout && { colorLayout: result.colorLayout }),
       verification: result.verification,
+      ...(mask && { diffMask: mask }),
       caps: registry.table(),
     },
-    [buffer],
+    mask ? [buffer, mask] : [buffer],
   );
 }
 

@@ -1,5 +1,6 @@
 import { label } from '../capabilities';
 import type { MetadataOutcome } from '../convert';
+import { renderCompareView } from './compareView';
 import { formatBytes, h } from './dom';
 import type { ConversionOutput } from './state';
 
@@ -32,6 +33,15 @@ export function renderResult(r: ConversionOutput): HTMLElement {
     `Metadata re-read from the output: EXIF ${OUTCOME[v.metadata.exif]}, GPS ${OUTCOME[v.metadata.gps]}, ICC ${OUTCOME[v.metadata.icc]}, XMP ${OUTCOME[v.metadata.xmp]}.`,
   );
 
+  const compare = renderCompareView({
+    sourceUrl: r.sourceUrl,
+    outputUrl: r.url,
+    width: r.width,
+    height: r.height,
+    diffMask: r.diffMask,
+    differingPixels: v.differingPixels,
+  });
+
   return h(
     'div',
     { class: 'result' },
@@ -52,5 +62,6 @@ export function renderResult(r: ConversionOutput): HTMLElement {
       meta,
       h('p', {}, h('a', { class: 'button', href: r.url, download: r.filename, 'data-testid': 'download' }, 'Download')),
     ),
+    compare,
   );
 }

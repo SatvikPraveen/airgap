@@ -53,6 +53,12 @@ export interface ConversionOutput {
   verification: Verification;
   target: TargetKey;
   pixelCount: number;
+  width: number;
+  height: number;
+  /** Change magnitude per pixel; only when not identical. */
+  diffMask?: Uint8Array;
+  /** Blob URL of the source preview, for the compare view. */
+  sourceUrl: string;
 }
 
 export interface AppState {
@@ -74,6 +80,8 @@ export interface AppState {
   error: string | null;
   /** Non-blocking advice about the loaded source (e.g. a large-image warning). */
   notice: string | null;
+  /** The metadata inspector's disclosure state survives re-renders. */
+  inspectorOpen: boolean;
   result: ConversionOutput | null;
 }
 
@@ -93,6 +101,7 @@ export function initialState(): AppState {
     busy: 'idle',
     error: null,
     notice: null,
+    inspectorOpen: false,
     result: null,
   };
 }
