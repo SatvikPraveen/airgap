@@ -1,5 +1,5 @@
 import { defineConfig, type Plugin } from 'vite';
-import { wasmBase64 } from './vite-plugins';
+import { licensesPage, wasmBase64 } from './vite-plugins';
 
 /**
  * The committed index.html carries the strict production CSP
@@ -32,7 +32,7 @@ function devOnlyCsp(): Plugin {
 
 export default defineConfig({
   base: '/airgap/',
-  plugins: [devOnlyCsp(), wasmBase64()],
+  plugins: [devOnlyCsp(), wasmBase64(), licensesPage()],
   build: {
     target: 'es2022',
     // Never inline assets as data: URIs; keep everything as plain same-origin files.

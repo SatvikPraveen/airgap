@@ -314,3 +314,17 @@ Two GitHub Actions workflows:
   test workflow, and only if that job succeeds does the deploy job build
   `dist/` and publish it with `actions/deploy-pages`. In the repository
   settings, Pages must be set to "GitHub Actions" as the source.
+
+## Licence
+
+Airgap is released under the [MIT licence](LICENSE). The codecs it bundles are
+separate works under their own terms: Apache-2.0 (jSquash wrappers, Highway),
+BSD (mozjpeg/libjpeg-turbo, libwebp, libavif, libaom, libjxl, skcms), MIT
+(Brotli, UTIF.js, pako, Emscripten, the Rust `png` crate and wasm-bindgen)
+and the Alliance for Open Media Patent License 1.0 for AV1. Every component,
+its role, and the verbatim licence text are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the `licenses/`
+directory, and published with the app at `licenses.html`. `npm run
+check:notices` fails the build if a bundled dependency goes unlisted.
+
+This software is based in part on the work of the Independent JPEG Group.

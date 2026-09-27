@@ -6,7 +6,8 @@
   "description": "Client-side image format converter. Image bytes are never transmitted anywhere.",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "check:notices": "node scripts/check-notices.mjs",
+    "build": "npm run check:notices && npm run typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json",
     "test": "vitest run",
@@ -40,5 +41,11 @@
     "@jsquash/webp": "^1.5.0",
     "pako": "^2.2.0",
     "utif": "^3.1.0"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SatvikPraveen/airgap.git"
+  },
+  "homepage": "https://satvikpraveen.github.io/airgap/"
 }

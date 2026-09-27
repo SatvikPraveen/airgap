@@ -22,6 +22,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run check:notices
+
       - run: npm run typecheck
 
       # Playwright browsers are keyed on the exact Playwright version in the lockfile,

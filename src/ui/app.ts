@@ -168,7 +168,18 @@ export function mountApp(root: HTMLElement): void {
     h('section', { class: 'panel' }, h('h2', {}, '3. What this conversion will discard'), lossHost),
     h('section', { class: 'panel' }, h('div', { class: 'inline' }, convertBtn, status)),
     resultSection,
-    h('footer', {}, 'Every codec is probed in this browser before its capabilities are believed. Every loss listed above is reported, never hidden.'),
+    h(
+      'footer',
+      {},
+      h('p', {}, 'Every codec is probed in this browser before its capabilities are believed. Every loss listed above is reported, never hidden.'),
+      h(
+        'p',
+        { class: 'footer-links' },
+        h('a', { href: 'https://github.com/SatvikPraveen/airgap', rel: 'noopener noreferrer' }, 'Source on GitHub'),
+        ' · ',
+        h('a', { href: 'licenses.html', 'data-testid': 'licenses-link' }, 'Licences and third-party notices'),
+      ),
+    ),
   );
   targetSelect.id = 'target';
 
