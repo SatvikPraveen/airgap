@@ -11,6 +11,7 @@ export interface ConvertedMessage {
   format: ImageFormat;
   bitDepth: number;
   encoderId: string;
+  colorLayout?: string;
   verification: Verification;
 }
 
@@ -82,7 +83,7 @@ export class WorkerClient {
   async convert(id: number, plan: ConversionPlan): Promise<ConvertedMessage> {
     const m = await this.send({ type: 'convert', id, plan }, `id:${id}`);
     if (m.type !== 'converted') throw new Error('unexpected worker reply');
-    return { bytes: m.bytes, mime: m.mime, format: m.format, bitDepth: m.bitDepth, encoderId: m.encoderId, verification: m.verification };
+    return { bytes: m.bytes, mime: m.mime, format: m.format, bitDepth: m.bitDepth, encoderId: m.encoderId, ...(m.colorLayout && { colorLayout: m.colorLayout }), verification: m.verification };
   }
 
   unload(id: number): void {

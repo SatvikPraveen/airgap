@@ -43,7 +43,9 @@ async function tags(bytes: Uint8Array): Promise<Record<string, unknown>> {
 
 describe('registry resolution', () => {
   it('prefers the wasm codec for every format and keeps canvas as the fallback for png/jpeg/webp', async () => {
-    for (const f of ['png', 'jpeg', 'webp', 'avif', 'jxl'] as const) expect((await registry.resolve(f, 'decode')).resolved.codecId).toBe(`wasm-${f}`);
+    expect((await registry.resolve('png', 'decode')).resolved.codecId).toBe('airgap-png');
+    expect((await registry.resolve('png', 'encode')).resolved.codecId).toBe('airgap-png');
+    for (const f of ['jpeg', 'webp', 'avif', 'jxl'] as const) expect((await registry.resolve(f, 'decode')).resolved.codecId).toBe(`wasm-${f}`);
     expect((await registry.resolve('tiff', 'encode')).resolved.codecId).toBe('utif-tiff');
     const table = registry.table();
     expect(table.png?.decode?.capabilities.exactAlpha).toBe(true);

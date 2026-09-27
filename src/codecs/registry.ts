@@ -13,7 +13,7 @@ type Loader = () => Promise<Codec>;
 type Role = 'decode' | 'encode';
 
 const LOADERS: Record<ImageFormat, Loader[]> = {
-  png: [() => import('./wasm/png').then((m) => m.createWasmPngCodec()), async () => createCanvasCodec('png')],
+  png: [() => import('./wasm/png').then((m) => m.createAirgapPngCodec()), () => import('./wasm/png').then((m) => m.createWasmPngCodec()), async () => createCanvasCodec('png')],
   jpeg: [() => import('./wasm/jpeg').then((m) => m.createWasmJpegCodec()), async () => createCanvasCodec('jpeg')],
   webp: [() => import('./wasm/webp').then((m) => m.createWasmWebpCodec()), async () => createCanvasCodec('webp')],
   avif: [() => import('./wasm/avif').then((m) => m.createWasmAvifCodec()), async () => createCanvasCodec('avif')],

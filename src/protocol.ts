@@ -33,6 +33,7 @@ export type FromWorker =
       format: ImageFormat;
       bitDepth: number;
       encoderId: string;
+      colorLayout?: string;
       verification: Verification;
       caps: CapabilityTable;
     }

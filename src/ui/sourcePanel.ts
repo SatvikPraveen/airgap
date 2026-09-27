@@ -11,6 +11,7 @@ export function renderSource(src: LoadedSource): HTMLElement {
     ['Format', `${label(src.info.format)}${m.sourceLossless === false ? ' (lossy source)' : ''}`],
     ['Size', `${src.info.width} × ${src.info.height} px`],
     ['Bit depth', m.bitDepthUncertain ? `unknown (assumed ${m.bitDepth}-bit)` : `${m.bitDepth}-bit per channel`],
+    ...(m.colorLayout ? [['Stored as', m.colorLayout] as [string, string]] : []),
     [
       'Alpha',
       !m.hasAlpha

@@ -65,18 +65,21 @@ function png8(dims, colorType, fill) {
 function png16(dims, colorType, fill) {
   const { width, height } = dims;
   const img = new PNG({ width, height, colorType, bitDepth: 16, deflateLevel: 9, filterType: 0 });
-  const data = Buffer.alloc(width * height * 8);
+  // pngjs takes 16-bit samples in the platform's native byte order (it views img.data
+  // as a Uint16Array and writes big-endian itself), so fill a Uint16Array, never
+  // writeUInt16BE: that produced byte-swapped fixtures on little-endian hosts.
+  const samples = new Uint16Array(width * height * 4);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 8;
+      const i = (y * width + x) * 4;
       const [r, g, b, a = 0xffff] = fill(x, y);
-      data.writeUInt16BE(r, i);
-      data.writeUInt16BE(g, i + 2);
-      data.writeUInt16BE(b, i + 4);
-      data.writeUInt16BE(a, i + 6);
+      samples[i] = r;
+      samples[i + 1] = g;
+      samples[i + 2] = b;
+      samples[i + 3] = a;
     }
   }
-  img.data = data;
+  img.data = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
   return PNG.sync.write(img, { colorType, bitDepth: 16 });
 }
 

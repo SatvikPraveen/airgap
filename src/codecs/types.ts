@@ -75,6 +75,8 @@ export interface ImageMetadata {
   isAnimated: boolean;
   /** For WebP/AVIF/JXL: the source was stored losslessly. */
   sourceLossless?: boolean;
+  /** How samples are laid out in the container, for display: e.g. "palette (43 colours), 8-bit". */
+  colorLayout?: string;
   /** Raw payloads, when present and extracted: EXIF is a TIFF-structured blob. */
   exif?: Uint8Array;
   icc?: Uint8Array;

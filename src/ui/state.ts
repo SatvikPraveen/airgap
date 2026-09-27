@@ -48,6 +48,7 @@ export interface ConversionOutput {
   format: ImageFormat;
   bitDepth: number;
   encoderId: string;
+  colorLayout?: string;
   filename: string;
   verification: Verification;
   target: TargetKey;

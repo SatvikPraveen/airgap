@@ -89,6 +89,7 @@ async function doConvert(id: number, plan: Parameters<typeof convert>[3]): Promi
       format: result.format,
       bitDepth: result.bitDepth,
       encoderId: result.encoderId,
+      ...(result.colorLayout && { colorLayout: result.colorLayout }),
       verification: result.verification,
       caps: registry.table(),
     },

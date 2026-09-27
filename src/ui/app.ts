@@ -394,6 +394,7 @@ export function mountApp(root: HTMLElement): void {
         format: t.format,
         bitDepth: out.bitDepth,
         encoderId: out.encoderId,
+        ...(out.colorLayout && { colorLayout: out.colorLayout }),
         filename,
         verification: out.verification,
         target: state.target,

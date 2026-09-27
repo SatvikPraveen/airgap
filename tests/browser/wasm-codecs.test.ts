@@ -8,18 +8,20 @@ import { decode as decodeImageJs } from 'tiff';
 import { createCanvasCodec } from '../../src/codecs/canvas';
 import { probeCodec } from '../../src/codecs/probe';
 import { createTiffCodec } from '../../src/codecs/tiff';
-import type { Codec } from '../../src/codecs/types';
+import type { Codec, PixelData } from '../../src/codecs/types';
 import { createWasmAvifCodec } from '../../src/codecs/wasm/avif';
 import { createWasmJpegCodec } from '../../src/codecs/wasm/jpeg';
 import { createWasmJxlCodec } from '../../src/codecs/wasm/jxl';
-import { createWasmPngCodec } from '../../src/codecs/wasm/png';
+import { createAirgapPngCodec, createWasmPngCodec } from '../../src/codecs/wasm/png';
 import { createWasmWebpCodec } from '../../src/codecs/wasm/webp';
+import { inspect } from '../../src/inspect';
 import { convertBitDepth, probeImage } from '../../src/pixels';
 import * as P from '../fixtures/pattern.mjs';
 import { asImage, firstMismatch, fixtureBytes, maxChannelDiff, rasterFrom } from './helpers';
 
 const codecs: Record<string, Promise<Codec>> = {
-  png: createWasmPngCodec(),
+  png: createAirgapPngCodec(),
+  'png-rs': createWasmPngCodec(),
   jpeg: createWasmJpegCodec(),
   webp: createWasmWebpCodec(),
   avif: createWasmAvifCodec(),
@@ -45,10 +47,10 @@ describe('probes (the same ones the app runs)', () => {
     expect(r.capabilities.decodeExact).toBe(false);
     expect(r.probe.detail).toMatch(/max diff 1\b/);
   });
-  for (const name of ['png', 'webp', 'avif', 'tiff'] as const) {
+  for (const name of ['png', 'png-rs', 'webp', 'avif', 'tiff'] as const) {
     it(`${name}: lossless and exactAlpha verified in this browser`, async () => {
       const codec = await codecs[name]!;
-      const r = await probeCodec(codec, name === 'tiff' ? undefined : createCanvasCodec(name));
+      const r = await probeCodec(codec, name === 'tiff' ? undefined : createCanvasCodec(name === 'png-rs' ? 'png' : name));
       console.log(`[probe ${name}]`, r.probe.detail, JSON.stringify(r.probe.checks));
       expect(r.probe.ok, r.probe.detail).toBe(true);
       expect(r.capabilities.lossless, 'lossless').toBe(true);
@@ -83,7 +85,7 @@ describe('exact RGBA round trips (full tuple, alpha-0 pixels included)', () => {
     expect(firstMismatch(src.data, back.pixels.data)).not.toBeNull();
     expect(maxChannelDiff(src.data, back.pixels.data)).toBe(1);
   });
-  for (const name of ['png', 'webp', 'avif', 'tiff'] as const) {
+  for (const name of ['png', 'png-rs', 'webp', 'avif', 'tiff'] as const) {
     it(`${name}: rgba-partial pattern -> encode lossless -> decode is identical`, async () => {
       const codec = await codecs[name]!;
       const src = rgba8();
@@ -93,7 +95,7 @@ describe('exact RGBA round trips (full tuple, alpha-0 pixels included)', () => {
       expect(firstMismatch(src.data, back.pixels.data)).toBeNull();
     });
   }
-  for (const name of ['png', 'tiff'] as const) {
+  for (const name of ['png', 'png-rs', 'tiff'] as const) {
     it(`${name}: 16-bit RGBA round trip is identical`, async () => {
       const codec = await codecs[name]!;
       const src = rgba16();
@@ -102,6 +104,28 @@ describe('exact RGBA round trips (full tuple, alpha-0 pixels included)', () => {
       expect(firstMismatch(src.data, back.pixels.data)).toBeNull();
     });
   }
+  it('png (airgap writer): palette, greyscale and grey+alpha layouts decode identically through the Rust decoder AND the browser', async () => {
+    const codec = await codecs.png!;
+    const canvas = createCanvasCodec('png');
+    const cases: [string, PixelData, RegExp][] = [
+      ['palette', rasterFrom({ width: 37, height: 11 }, (x, y) => [((x + y) % 5) * 50, ((x + y) % 5) * 30, 255 - ((x + y) % 5) * 40, (x + y) % 5 === 0 ? 0 : 255]), /^palette \(5 colours\), 4-bit/],
+      ['greyscale', rasterFrom({ width: 64, height: 4 }, (x, y) => [(x * 4 + y) & 255, (x * 4 + y) & 255, (x * 4 + y) & 255, 255]), /^greyscale, 8-bit/],
+      ['grey+alpha', rasterFrom({ width: 64, height: 8 }, (x, y) => [(x * 4) & 255, (x * 4) & 255, (x * 4) & 255, (y * 32) & 255]), /^greyscale \+ alpha, 8-bit/],
+      ['grey 16', rasterFrom({ width: 19, height: 5 }, (x, y) => [x * 3000 + y, x * 3000 + y, x * 3000 + y, 65535], 16), /^greyscale, 16-bit/],
+    ];
+    for (const [name, src, layout] of cases) {
+      const bytes = await codec.encode(asImage(src, { hasAlpha: true, hasTransparency: true }), { lossless: true });
+      expect(inspect(bytes).metadata.colorLayout, name).toMatch(layout);
+      const back = await codec.decode(bytes);
+      expect(back.pixels.bitDepth, name).toBe(src.bitDepth);
+      expect(firstMismatch(src.data, back.pixels.data), name).toBeNull();
+      if (src.bitDepth === 8) {
+        const other = await canvas.decode(bytes);
+        // Canvas is premultiplied: compare opaque pixels only, which is what the probe does too.
+        for (let i = 0; i < src.data.length; i += 4) if (src.data[i + 3] === 255) for (let c = 0; c < 4; c++) expect(other.pixels.data[i + c], `${name} @${i}`).toBe(src.data[i + c]);
+      }
+    }
+  });
   for (const depth of [10, 12] as const) {
     it(`avif: ${depth}-bit RGBA round trip is identical`, async () => {
       const codec = await codecs.avif!;

@@ -40,6 +40,8 @@ export interface ConversionResult {
   format: ImageFormat;
   bitDepth: number;
   encoderId: string;
+  /** How the container stores the samples (re-read from the output header), when the format exposes it. */
+  colorLayout?: string;
   verification: Verification;
 }
 
@@ -152,7 +154,7 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   };
   verification.metadataOk = !Object.values(verification.metadata).includes('unexpected');
 
-  return { bytes, mime: MIME[target.format], format: target.format, bitDepth: outDepth, encoderId: p.encoder.id, verification };
+  return { bytes, mime: MIME[target.format], format: target.format, bitDepth: outDepth, encoderId: p.encoder.id, ...(h.colorLayout && { colorLayout: h.colorLayout }), verification };
 }
 
 function clampQuality(q: number | undefined): number {

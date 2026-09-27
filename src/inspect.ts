@@ -107,13 +107,15 @@ function inspectPng(b: Uint8Array): HeaderInfo {
   let isAnimated = false;
   let orientation: number | undefined;
   let sawIhdr = false;
+  let paletteSize = 0;
 
   while (off + 8 <= b.length) {
     const len = u32be(b, off);
     const type = ascii(b, off + 4, 4);
     const dataOff = off + 8;
     if (dataOff + len > b.length) break;
-    if (type === 'IHDR') {
+    if (type === 'PLTE') paletteSize = Math.floor(len / 3);
+    else if (type === 'IHDR') {
       sawIhdr = true;
       width = u32be(b, dataOff);
       height = u32be(b, dataOff + 4);
@@ -145,7 +147,15 @@ function inspectPng(b: Uint8Array): HeaderInfo {
     sourceLossless: true,
   });
   if (orientation !== undefined) metadata.orientation = orientation;
+  metadata.colorLayout = pngLayoutLabel(colorType, bitDepth, paletteSize);
   return { format: 'png', width, height, metadata };
+}
+
+/** Same wording as src/codecs/png-writer.ts layoutLabel, from the container's point of view. */
+function pngLayoutLabel(colorType: number, bitDepth: number, paletteSize: number): string {
+  const base =
+    colorType === 0 ? 'greyscale' : colorType === 4 ? 'greyscale + alpha' : colorType === 3 ? `palette (${paletteSize} colours)` : colorType === 2 ? 'RGB' : colorType === 6 ? 'RGBA' : `colour type ${colorType}`;
+  return `${base}, ${bitDepth}-bit`;
 }
 
 // ------------------------------------------------------------------- JPEG

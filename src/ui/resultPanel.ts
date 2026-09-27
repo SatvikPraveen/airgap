@@ -44,6 +44,7 @@ export function renderResult(r: ConversionOutput): HTMLElement {
         { class: 'facts' },
         h('dt', {}, 'Output'),
         h('dd', { 'data-testid': 'result-format' }, `${label(r.format)} · ${r.bitDepth}-bit · ${formatBytes(r.size)} · ${r.encoderId}`),
+        ...(r.colorLayout ? [h('dt', {}, 'Stored as'), h('dd', { 'data-testid': 'result-layout' }, r.colorLayout)] : []),
         h('dt', {}, 'File'),
         h('dd', {}, r.filename),
       ),

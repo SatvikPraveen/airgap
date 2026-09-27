@@ -66,13 +66,13 @@ export interface Raster {
   data: Uint8Array | Uint16Array;
 }
 
-/** Independent PNG decode in Node (pngjs), no browser involved. 16-bit stays 16-bit. */
+/** Independent PNG decode in Node (pngjs), no browser involved. 16-bit stays 16-bit; pngjs hands 16-bit samples back in native byte order. */
 export function decodePngNode(bytes: Buffer): Raster {
   const png = PNG.sync.read(bytes, { skipRescale: true });
   if (png.depth === 16) {
     const d = Buffer.from(png.data.buffer, png.data.byteOffset, png.data.byteLength);
     const out = new Uint16Array(d.length / 2);
-    for (let i = 0; i < out.length; i++) out[i] = d.readUInt16BE(i * 2);
+    for (let i = 0; i < out.length; i++) out[i] = d.readUInt16LE(i * 2);
     return { width: png.width, height: png.height, data: out };
   }
   return { width: png.width, height: png.height, data: new Uint8Array(png.data) };

@@ -28,7 +28,7 @@ test('drop rgb8.png, convert to PNG, download: bytes decode pixel-identical (ind
   expect(download.suggestedFilename()).toBe('rgb8-converted.png');
   assertPixelIdentical(decodePngNode(fixture('rgb8.png')), decodePngNode(bytes));
   await expect(page.getByTestId('verification')).toHaveAttribute('data-identical', 'true');
-  await expect(page.getByTestId('result-format')).toContainText('wasm-png');
+  await expect(page.getByTestId('result-format')).toContainText('airgap-png');
 });
 
 test('ALPHA: rgba-partial.png -> PNG is exact over the full RGBA tuple, transparent pixels included', async ({ page }) => {
