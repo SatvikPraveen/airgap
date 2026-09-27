@@ -54,6 +54,12 @@ jobs:
       - name: Browser tests (real codecs in headless Chromium)
         run: npm run test:browser
 
+      - name: Production build
+        run: npm run build
+
+      - name: Bundle size budget
+        run: npm run check:budget
+
       - name: End-to-end tests (production build, privacy trap)
         run: npm run test:e2e
 

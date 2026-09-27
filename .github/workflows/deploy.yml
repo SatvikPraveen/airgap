@@ -28,6 +28,7 @@ jobs:
       contents: read
       pages: write
       id-token: write
+      attestations: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -41,11 +42,26 @@ jobs:
 
       - run: npm ci
 
-      # `npm run build` = typecheck + `vite build` with base '/airgap/' (vite.config.ts).
+      # `npm run build` = notices check + typecheck + `vite build` with base '/airgap/'
+      # (vite.config.ts) + dist/checksums.txt (SHA-256 of every shipped file).
       - run: npm run build
+        env:
+          AIRGAP_COMMIT: ${{ github.sha }}
 
       - name: Report bundle sizes
         run: node scripts/bundle-report.mjs
+
+      - name: Bundle size budget
+        run: npm run check:budget
+
+      # Build provenance: a signed statement that this workflow, at this commit,
+      # produced these exact checksums. Anyone can verify what the site serves:
+      #   gh attestation verify checksums.txt --repo ${{ github.repository }}
+      #   sha256sum -c checksums.txt   (against files fetched from the site)
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/checksums.txt
 
       - uses: actions/configure-pages@v6
 

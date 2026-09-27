@@ -16,6 +16,22 @@ import { inspect } from '../inspect';
 import { sizeRefusal, sizeWarning } from '../limits';
 import { WorkerCancelledError, WorkerClient } from './workerClient';
 
+/** "build abc1234" linking to the commit, plus the checksums file the deploy workflow attests. */
+function buildLink(): HTMLElement {
+  const full = __AIRGAP_COMMIT__;
+  const sha = full.replace(/-dev$/, '');
+  const short = sha.slice(0, 7) + (full.endsWith('-dev') ? ' (local build)' : '');
+  if (!/^[0-9a-f]{7,40}$/.test(sha)) return h('span', { 'data-testid': 'build-commit' }, 'build unknown');
+  return h(
+    'span',
+    { 'data-testid': 'build-commit' },
+    'build ',
+    h('a', { href: `https://github.com/SatvikPraveen/airgap/commit/${sha}`, rel: 'noopener noreferrer', title: 'The commit this build was made from' }, h('code', {}, short)),
+    ' · ',
+    h('a', { href: 'checksums.txt', title: 'SHA-256 of every file this build ships; attested by the deploy workflow' }, 'checksums'),
+  );
+}
+
 export function mountApp(root: HTMLElement): void {
   const state: AppState = initialState();
   const worker = new WorkerClient();
@@ -186,6 +202,8 @@ export function mountApp(root: HTMLElement): void {
         h('a', { href: 'https://github.com/SatvikPraveen/airgap', rel: 'noopener noreferrer' }, 'Source on GitHub'),
         ' · ',
         h('a', { href: 'licenses.html', 'data-testid': 'licenses-link' }, 'Licences and third-party notices'),
+        ' · ',
+        buildLink(),
       ),
     ),
   );

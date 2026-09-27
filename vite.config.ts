@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { defineConfig, type Plugin } from 'vite';
 import { licensesPage, wasmBase64 } from './vite-plugins';
 
@@ -30,8 +31,22 @@ function devOnlyCsp(): Plugin {
   };
 }
 
+/** Commit the build came from: CI passes it in; locally it is read from git. Shown in the footer. */
+function buildCommit(): string {
+  const fromEnv = process.env['AIRGAP_COMMIT'];
+  if (fromEnv) return fromEnv;
+  try {
+    return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() + '-dev';
+  } catch {
+    return 'unknown';
+  }
+}
+
 export default defineConfig({
   base: '/airgap/',
+  define: {
+    __AIRGAP_COMMIT__: JSON.stringify(buildCommit()),
+  },
   plugins: [devOnlyCsp(), wasmBase64(), licensesPage()],
   build: {
     target: 'es2022',
