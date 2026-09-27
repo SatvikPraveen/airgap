@@ -72,6 +72,8 @@ export interface AppState {
   background: string;
   busy: 'idle' | 'loading' | 'converting';
   error: string | null;
+  /** Non-blocking advice about the loaded source (e.g. a large-image warning). */
+  notice: string | null;
   result: ConversionOutput | null;
 }
 
@@ -90,6 +92,7 @@ export function initialState(): AppState {
     background: '#ffffff',
     busy: 'idle',
     error: null,
+    notice: null,
     result: null,
   };
 }

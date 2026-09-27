@@ -1,4 +1,9 @@
-/** Promise wrapper around the conversion worker. */
+/**
+ * Promise wrapper around the conversion worker, with recovery: a wasm codec
+ * that aborts or hangs cannot be interrupted from inside the worker, so
+ * cancelling (or a crash) terminates the worker and starts a fresh one. The
+ * app then re-probes codecs on demand and reloads the current source.
+ */
 import type { CapabilityTable, ImageFormat } from '../codecs/types';
 import type { ConversionPlan, Verification } from '../convert';
 import type { FromWorker, SourceInfo, ToWorker } from '../protocol';
@@ -15,25 +20,64 @@ export interface ConvertedMessage {
   verification: Verification;
 }
 
+export class WorkerCancelledError extends Error {
+  override name = 'WorkerCancelledError';
+}
+
+export class WorkerCrashedError extends Error {
+  override name = 'WorkerCrashedError';
+}
+
 type Pending = { resolve: (m: FromWorker) => void; reject: (e: Error) => void };
 
 export class WorkerClient {
-  private worker: Worker;
+  private worker!: Worker;
   private pending = new Map<string, Pending>();
   private nextId = 1;
+  /** Bumped on every restart; a message from an old worker instance is ignored. */
+  private generation = 0;
   /** Fires whenever the worker reports a new capability table. */
   onCaps: (caps: CapabilityTable) => void = () => {};
+  /** Fires when the worker died on its own (not via cancel()). The app decides what to reload. */
+  onCrash: (error: Error) => void = () => {};
 
   constructor() {
+    this.spawn();
+  }
+
+  private spawn(): void {
+    const gen = ++this.generation;
     // Blob-URL bootstrap so the worker inherits the page CSP (see worker-boot.ts),
     // then the real worker module is imported by absolute same-origin URL.
-    this.worker = new BootWorker();
-    this.worker.postMessage({ type: 'boot', url: new URL(workerModuleUrl, location.href).href });
-    this.worker.onmessage = (ev: MessageEvent<FromWorker>) => this.dispatch(ev.data);
-    this.worker.onerror = (ev) => {
-      for (const p of this.pending.values()) p.reject(new Error(ev.message || 'Worker crashed'));
-      this.pending.clear();
+    const w = new BootWorker();
+    w.postMessage({ type: 'boot', url: new URL(workerModuleUrl, location.href).href });
+    w.onmessage = (ev: MessageEvent<FromWorker>) => {
+      if (gen === this.generation) this.dispatch(ev.data);
     };
+    w.onerror = (ev) => {
+      if (gen !== this.generation) return;
+      const err = new WorkerCrashedError(ev.message || 'The conversion worker crashed.');
+      this.rejectAll(err);
+      this.onCrash(err);
+    };
+    this.worker = w;
+  }
+
+  private rejectAll(err: Error): void {
+    for (const p of this.pending.values()) p.reject(err);
+    this.pending.clear();
+  }
+
+  /** Terminates the current worker (whatever it is doing) and starts a fresh one. */
+  restart(reason = 'Cancelled.'): void {
+    this.worker.terminate();
+    this.rejectAll(new WorkerCancelledError(reason));
+    this.spawn();
+  }
+
+  /** True while any request is outstanding. */
+  get busy(): boolean {
+    return this.pending.size > 0;
   }
 
   private dispatch(msg: FromWorker): void {

@@ -12,7 +12,9 @@ import { renderLosses } from './lossPanel';
 import { renderResult } from './resultPanel';
 import { renderSource } from './sourcePanel';
 import { initialState, TARGET_ORDER, TARGETS, type AppState, type TargetKey } from './state';
-import { WorkerClient } from './workerClient';
+import { inspect } from '../inspect';
+import { sizeRefusal, sizeWarning } from '../limits';
+import { WorkerCancelledError, WorkerClient } from './workerClient';
 
 export function mountApp(root: HTMLElement): void {
   const state: AppState = initialState();
@@ -20,6 +22,10 @@ export function mountApp(root: HTMLElement): void {
   worker.onCaps = (caps) => {
     state.caps = caps;
     render();
+  };
+  worker.onCrash = (err) => {
+    state.error = `${err.message} The worker has been restarted; the source is being reloaded.`;
+    void recover();
   };
 
   // ---- static skeleton ---------------------------------------------------
@@ -59,6 +65,8 @@ export function mountApp(root: HTMLElement): void {
   const iccField = h('fieldset', { class: 'field', 'data-testid': 'icc-field' });
   const lossHost = h('div', { 'data-testid': 'loss-panel' });
   const convertBtn = h('button', { class: 'button', type: 'button', 'data-testid': 'convert' }, 'Convert');
+  const cancelBtn = h('button', { class: 'button secondary', type: 'button', 'data-testid': 'cancel', hidden: true }, 'Cancel');
+  const noticeBox = h('p', { class: 'note', 'data-testid': 'notice', hidden: true });
   const resultHost = h('div', { 'data-testid': 'result-panel' });
   const resultSection = h('section', { class: 'panel', hidden: true }, h('h2', {}, 'Result'), resultHost);
   const status = h('span', { class: 'hint', 'data-testid': 'status', 'aria-live': 'polite' });
@@ -139,7 +147,7 @@ export function mountApp(root: HTMLElement): void {
       '), for the page and for its worker. Verify it yourself in the DevTools Network tab.',
     ),
     errorBox,
-    h('section', { class: 'panel' }, h('h2', {}, '1. Source'), dropzone, sourceHost),
+    h('section', { class: 'panel' }, h('h2', {}, '1. Source'), dropzone, sourceHost, noticeBox),
     h(
       'section',
       { class: 'panel' },
@@ -166,7 +174,7 @@ export function mountApp(root: HTMLElement): void {
       ),
     ),
     h('section', { class: 'panel' }, h('h2', {}, '3. What this conversion will discard'), lossHost),
-    h('section', { class: 'panel' }, h('div', { class: 'inline' }, convertBtn, status)),
+    h('section', { class: 'panel' }, h('div', { class: 'inline' }, convertBtn, cancelBtn, status)),
     resultSection,
     h(
       'footer',
@@ -202,6 +210,7 @@ export function mountApp(root: HTMLElement): void {
     render();
   });
   convertBtn.addEventListener('click', () => void runConversion());
+  cancelBtn.addEventListener('click', () => cancelWork());
 
   // ---- derived -------------------------------------------------------------
 
@@ -245,6 +254,7 @@ export function mountApp(root: HTMLElement): void {
     worker
       .ensure(format, 'encode')
       .catch((err: Error) => {
+        if (err instanceof WorkerCancelledError) return; // the restart clears and re-probes on demand
         state.ensureErrors[format] = err.message;
       })
       .finally(() => {
@@ -261,6 +271,8 @@ export function mountApp(root: HTMLElement): void {
 
     errorBox.hidden = !state.error;
     errorBox.textContent = state.error ?? '';
+    noticeBox.hidden = !state.notice;
+    noticeBox.textContent = state.notice ?? '';
 
     // Selecting a target loads and probes its encoder on demand.
     const current = TARGETS[state.target];
@@ -331,7 +343,8 @@ export function mountApp(root: HTMLElement): void {
       );
     }
     convertBtn.disabled = !state.ready || !src || state.busy !== 'idle' || !targetAvailable;
-    status.textContent = state.busy === 'loading' ? 'Decoding…' : state.busy === 'converting' ? 'Converting and verifying…' : '';
+    cancelBtn.hidden = state.busy === 'idle';
+    status.textContent = state.busy === 'loading' ? 'Decoding…' : state.busy === 'converting' ? 'Converting and verifying…' : state.ready ? '' : 'Starting the conversion worker…';
 
     clear(resultHost);
     resultSection.hidden = !state.result;
@@ -347,11 +360,25 @@ export function mountApp(root: HTMLElement): void {
 
   async function loadFile(file: File): Promise<void> {
     state.error = null;
+    state.notice = null;
     state.busy = 'loading';
     discardResult();
     render();
     try {
       const bytes = await file.arrayBuffer();
+      // Memory guard, from the header alone, before any pixels are decoded. If the
+      // header cannot be read the worker reports the real error.
+      let header: ReturnType<typeof inspect> | null = null;
+      try {
+        header = inspect(new Uint8Array(bytes));
+      } catch {
+        header = null;
+      }
+      if (header) {
+        const refusal = sizeRefusal(header.width, header.height);
+        if (refusal) throw new Error(refusal);
+        state.notice = sizeWarning(header.width, header.height, header.metadata.bitDepth);
+      }
       const { id, info } = await worker.load(bytes);
       if (state.source) {
         worker.unload(state.source.id);
@@ -359,7 +386,7 @@ export function mountApp(root: HTMLElement): void {
       }
       state.source = { id, file, info, previewUrl: URL.createObjectURL(file) };
     } catch (err) {
-      state.error = (err as Error).message;
+      if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;
     } finally {
       state.busy = 'idle';
       render();
@@ -401,11 +428,43 @@ export function mountApp(root: HTMLElement): void {
         pixelCount: src.info.width * src.info.height,
       };
     } catch (err) {
-      state.error = (err as Error).message;
+      if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;
     } finally {
       state.busy = 'idle';
       render();
     }
+  }
+
+  /** Cancel = terminate the worker (wasm cannot be interrupted) and recover. */
+  function cancelWork(): void {
+    if (state.busy === 'idle') return;
+    worker.restart('Cancelled.');
+    void recover();
+  }
+
+  /**
+   * After a restart the new worker knows nothing: probed codecs, the loaded
+   * image, everything is gone. Re-initialise, then reload the current source
+   * so the user keeps their place.
+   */
+  async function recover(): Promise<void> {
+    state.caps = {};
+    state.ensuring.clear();
+    state.ensureErrors = {};
+    state.ready = false;
+    state.busy = 'idle';
+    render();
+    try {
+      state.caps = await worker.init();
+      state.ready = true;
+    } catch (err) {
+      state.error = `Could not restart the conversion worker: ${(err as Error).message}`;
+      render();
+      return;
+    }
+    render();
+    const src = state.source;
+    if (src) await loadFile(src.file);
   }
 
   // ---- boot ----------------------------------------------------------------------

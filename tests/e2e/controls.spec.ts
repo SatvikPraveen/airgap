@@ -109,3 +109,23 @@ test('an unsupported file shows an error and no source panel', async ({ page }) 
   await expect(page.getByTestId('error')).toContainText('PNG, JPEG, WebP, AVIF, JPEG XL and TIFF');
   await expect(page.getByTestId('source-facts')).toHaveCount(0);
 });
+
+test('the file picker accepts every format the app reads (AVIF, JPEG XL and TIFF included)', async ({ page }) => {
+  const accept = (await page.getByTestId('file-input').getAttribute('accept'))!;
+  for (const ext of ['.png', '.jpg', '.jpeg', '.webp', '.avif', '.jxl', '.tif', '.tiff']) expect(accept.split(','), ext).toContain(ext);
+  for (const mime of ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/jxl', 'image/tiff']) expect(accept.split(','), mime).toContain(mime);
+  await expect(page.getByTestId('dropzone')).toContainText('AVIF, JPEG XL or TIFF');
+});
+
+test('pasting an image file from the clipboard loads it', async ({ page }) => {
+  await page.evaluate(
+    ({ bytes, name, type }) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array(bytes)], name, { type }));
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    },
+    { bytes: Array.from(fixture('rgb8.png')), name: 'pasted.png', type: 'image/png' },
+  );
+  await expect(page.getByTestId('source-facts')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-fact="file"]')).toContainText('pasted.png');
+});
