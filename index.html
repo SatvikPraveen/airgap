@@ -8,6 +8,7 @@
         connect-src 'none'  -> no fetch / XHR / WebSocket / beacon, to anywhere
         default-src 'none'  -> nothing loads unless a directive below allows it
         img-src blob:       -> previews of the user's own in-memory images only
+        manifest-src 'self' -> the web app manifest (installable, file handler), same origin
         worker-src blob:    -> the worker is started from a blob: URL so that it
                                inherits this policy; a worker started from a
                                same-origin URL would NOT be covered by a meta CSP
@@ -19,12 +20,22 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob:; worker-src blob:; connect-src 'none'; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob:; worker-src blob:; connect-src 'none'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
+    <meta name="description" content="Image format converter that runs entirely in your browser and tells you exactly what a conversion throws away. PNG, JPEG, WebP, AVIF, JPEG XL and TIFF. Image bytes are never transmitted anywhere." />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f3f5f8" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1319" />
+    <meta property="og:title" content="Airgap — image converter that never uploads" />
+    <meta property="og:description" content="Convert PNG, JPEG, WebP, AVIF, JPEG XL and TIFF entirely in your browser, and see exactly what each conversion discards before and after." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/icon-512.png" />
     <title>Airgap</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
   </head>
   <body>
     <main id="app" aria-busy="true">

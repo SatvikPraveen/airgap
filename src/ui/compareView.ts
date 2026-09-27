@@ -102,6 +102,7 @@ export function renderCompareView(c: CompareInput): HTMLElement {
     while (stage.firstChild) stage.removeChild(stage.firstChild);
     const frame = h('div', { class: 'frame' });
     frame.style.aspectRatio = `${c.width} / ${c.height}`;
+    frame.style.setProperty('--w', String(c.width));
     if (!fit) {
       frame.style.width = `${c.width}px`;
       frame.style.height = `${c.height}px`;

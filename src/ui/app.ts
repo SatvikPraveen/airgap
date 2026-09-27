@@ -33,7 +33,12 @@ function buildLink(): HTMLElement {
   );
 }
 
-export function mountApp(root: HTMLElement): void {
+export interface AppHandle {
+  /** Load a file as if it had been dropped (used by the OS file-handler launch queue). */
+  loadFile(file: File): Promise<void>;
+}
+
+export function mountApp(root: HTMLElement): AppHandle {
   const state: AppState = initialState();
   const worker = new WorkerClient();
   worker.onCaps = (caps) => {
@@ -86,7 +91,7 @@ export function mountApp(root: HTMLElement): void {
   const cancelBtn = h('button', { class: 'button secondary', type: 'button', 'data-testid': 'cancel', hidden: true }, 'Cancel');
   const noticeBox = h('p', { class: 'note', 'data-testid': 'notice', hidden: true });
   const resultHost = h('div', { 'data-testid': 'result-panel' });
-  const resultSection = h('section', { class: 'panel', hidden: true }, h('h2', {}, 'Result'), resultHost);
+  const resultSection = h('section', { class: 'panel', hidden: true }, h('h2', {}, h('span', { class: 'step' }, '4'), 'Result'), resultHost);
   const status = h('span', { class: 'hint', 'data-testid': 'status', 'aria-live': 'polite' });
 
   for (const key of TARGET_ORDER) targetSelect.append(h('option', { value: key }, TARGETS[key].label));
@@ -153,23 +158,42 @@ export function mountApp(root: HTMLElement): void {
 
   clear(root);
   root.append(
-    h('header', { class: 'masthead' }, h('h1', {}, 'Airgap'), h('p', {}, 'Image format converter that tells you exactly what a conversion throws away.')),
+    h(
+      'header',
+      { class: 'masthead' },
+      h('img', { class: 'mark', src: 'favicon.svg', alt: '', width: '44', height: '44' }),
+      h('div', {}, h('h1', {}, 'Airgap'), h('p', {}, 'Image format converter that tells you exactly what a conversion throws away.')),
+    ),
     h(
       'div',
       { class: 'privacy' },
-      h('strong', {}, 'Conversion happens entirely in your browser.'),
-      ' Image bytes are never transmitted anywhere: this page has no server side and its ',
-      h('code', {}, 'Content-Security-Policy'),
-      ' forbids every outgoing connection (',
-      h('code', {}, "connect-src 'none'"),
-      '), for the page and for its worker. Verify it yourself in the DevTools Network tab.',
+      h(
+        'div',
+        {},
+        h('strong', {}, 'Conversion happens entirely in your browser.'),
+        ' Image bytes are never transmitted anywhere: this page has no server side and its ',
+        h('code', {}, 'Content-Security-Policy'),
+        ' forbids every outgoing connection (',
+        h('code', {}, "connect-src 'none'"),
+        '), for the page and for its worker. Verify it yourself in the DevTools Network tab.',
+      ),
+      h(
+        'div',
+        { class: 'pills', 'aria-label': 'Privacy properties' },
+        h('span', { class: 'pill ok' }, 'no upload'),
+        h('span', { class: 'pill ok' }, 'no server'),
+        h('span', { class: 'pill ok' }, 'no analytics'),
+        h('span', { class: 'pill' }, "connect-src 'none'"),
+        h('span', { class: 'pill' }, 'codecs probed before trusted'),
+        h('span', { class: 'pill' }, 'output re-decoded and verified'),
+      ),
     ),
     errorBox,
-    h('section', { class: 'panel' }, h('h2', {}, '1. Source'), dropzone, sourceHost, noticeBox, metadataHost),
+    h('section', { class: 'panel' }, h('h2', {}, h('span', { class: 'step' }, '1'), 'Source'), dropzone, sourceHost, noticeBox, metadataHost),
     h(
       'section',
       { class: 'panel' },
-      h('h2', {}, '2. Target'),
+      h('h2', {}, h('span', { class: 'step' }, '2'), 'Target'),
       h(
         'div',
         { class: 'controls' },
@@ -191,8 +215,8 @@ export function mountApp(root: HTMLElement): void {
         iccField,
       ),
     ),
-    h('section', { class: 'panel' }, h('h2', {}, '3. What this conversion will discard'), lossHost),
-    h('section', { class: 'panel' }, h('div', { class: 'inline' }, convertBtn, cancelBtn, status)),
+    h('section', { class: 'panel' }, h('h2', {}, h('span', { class: 'step' }, '3'), 'What this conversion will discard'), lossHost),
+    h('section', { class: 'panel action' }, convertBtn, cancelBtn, status),
     resultSection,
     h(
       'footer',
@@ -516,4 +540,6 @@ export function mountApp(root: HTMLElement): void {
       state.error = `Could not start the conversion worker: ${err.message}`;
       render();
     });
+
+  return { loadFile };
 }
