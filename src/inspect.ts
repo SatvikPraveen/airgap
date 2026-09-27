@@ -6,7 +6,7 @@
  * GPS), ICC, XMP, animation. Everything the loss-warning panel needs to know
  * BEFORE pixels are decoded.
  */
-import type { ImageFormat, ImageMetadata } from './codecs/types';
+import type { ColorDescription, ImageFormat, ImageMetadata } from './codecs/types';
 import { findEntry, parseTiffStructure, readNumber, readNumbers, TAG } from './metadata/tiff-ifd';
 
 export type HeaderMetadata = Omit<ImageMetadata, 'hasTransparency' | 'hasSemiTransparency' | 'exif' | 'icc' | 'xmp' | 'iccKind' | 'iccDescription'>;
@@ -108,6 +108,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
   let orientation: number | undefined;
   let sawIhdr = false;
   let paletteSize = 0;
+  let colorDescription: ColorDescription | undefined;
 
   while (off + 8 <= b.length) {
     const len = u32be(b, off);
@@ -123,6 +124,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
       colorType = b[dataOff + 9]!;
     } else if (type === 'tRNS') hasTrns = true;
     else if (type === 'iCCP') hasIcc = true;
+    else if (type === 'cICP' && len >= 4) colorDescription = cicp(b[dataOff]!, b[dataOff + 1]!, b[dataOff + 2]!, b[dataOff + 3]! === 1);
     else if (type === 'acTL') isAnimated = true;
     else if (type === 'eXIf') {
       hasExif = true;
@@ -147,8 +149,21 @@ function inspectPng(b: Uint8Array): HeaderInfo {
     sourceLossless: true,
   });
   if (orientation !== undefined) metadata.orientation = orientation;
+  if (colorDescription) metadata.colorDescription = colorDescription;
   metadata.colorLayout = pngLayoutLabel(colorType, bitDepth, paletteSize);
   return { format: 'png', width, height, metadata };
+}
+
+/**
+ * A CICP tuple worth reporting: anything other than "unspecified" (2). Unspecified primaries
+ * or transfer are what every sRGB-ish encoder writes by default and carry no information.
+ */
+export function cicp(primaries: number, transfer: number, matrix?: number, fullRange?: boolean): ColorDescription | undefined {
+  if ((primaries === 2 || primaries === 0) && (transfer === 2 || transfer === 0)) return undefined;
+  const cd: ColorDescription = { primaries, transfer };
+  if (matrix !== undefined) cd.matrix = matrix;
+  if (fullRange !== undefined) cd.fullRange = fullRange;
+  return cd;
 }
 
 /** Same wording as src/codecs/png-writer.ts layoutLabel, from the container's point of view. */
@@ -380,6 +395,7 @@ function inspectAvif(b: Uint8Array): HeaderInfo {
   let hasXmp = false;
   let isAnimated = false;
   let hasTransformProperties = false;
+  let colorDescription: ColorDescription | undefined;
   const exifItems: number[] = [];
   let iloc: Box | undefined;
 
@@ -407,7 +423,11 @@ function inspectAvif(b: Uint8Array): HeaderInfo {
                 const urn = ascii(b, fullBoxPayload(p), Math.min(64, p.end - fullBoxPayload(p)));
                 if (urn.includes('alpha')) hasAlpha = true;
               } else if (p.type === 'colr') {
-                if (ascii(b, p.start, 4) === 'prof' || ascii(b, p.start, 4) === 'rICC') hasIcc = true;
+                const kind = ascii(b, p.start, 4);
+                if (kind === 'prof' || kind === 'rICC') hasIcc = true;
+                else if (kind === 'nclx' && p.end - p.start >= 11 && !colorDescription) {
+                  colorDescription = cicp(u16be(b, p.start + 4), u16be(b, p.start + 6), u16be(b, p.start + 8), (b[p.start + 10]! & 0x80) !== 0);
+                }
               } else if (p.type === 'irot' || p.type === 'imir') {
                 hasTransformProperties = true;
               }
@@ -455,6 +475,7 @@ function inspectAvif(b: Uint8Array): HeaderInfo {
   const metadata = baseMeta({ bitDepth, hasAlpha, hasExif, hasGps, hasIcc, hasXmp, isAnimated });
   if (bitDepthUncertain) metadata.bitDepthUncertain = true;
   if (hasTransformProperties) metadata.hasTransformProperties = true;
+  if (colorDescription) metadata.colorDescription = colorDescription;
   return { format: 'avif', width, height, metadata };
 }
 
@@ -573,6 +594,7 @@ function inspectJxl(b: Uint8Array): HeaderInfo {
   let hasIcc = false;
   let isAnimated = false;
   let orientation: number | undefined;
+  let colorDescription: ColorDescription | undefined;
   if (cs && cs[0] === 0xff && cs[1] === 0x0a) {
     try {
       const r = new BitReader(cs.subarray(2));
@@ -673,8 +695,32 @@ function inspectJxl(b: Uint8Array): HeaderInfo {
             r.bool(); // xyb_encoded
             const ceDefault = r.bool();
             if (!ceDefault) {
+              // ColourEncoding (JPEG XL spec, B.4): enums use the same code points as CICP.
+              const ENUM: [number, number][] = [[0, 0], [1, 0], [2, 4], [18, 6]];
+              const CUSTOM_XY: [number, number][] = [[0, 19], [524288, 19], [1048576, 20], [2097152, 21]];
               const wantIcc = r.bool();
               if (wantIcc) hasIcc = true;
+              const colourSpace = r.u32(ENUM); // 0 RGB, 1 Grey, 2 XYB, 3 unknown
+              let primaries = 2;
+              let transfer = 2;
+              if (!wantIcc && colourSpace !== 2) {
+                const whitePoint = r.u32(ENUM);
+                if (whitePoint === 2) for (let k = 0; k < 2; k++) r.u32(CUSTOM_XY);
+                if (colourSpace !== 1) {
+                  primaries = r.u32(ENUM);
+                  if (primaries === 2) for (let k = 0; k < 6; k++) r.u32(CUSTOM_XY);
+                }
+                if (whitePoint !== 1 && primaries === 1) primaries = 2; // sRGB primaries need D65
+              }
+              if (!wantIcc) {
+                const haveGamma = r.bool();
+                if (haveGamma) {
+                  r.bits(24);
+                  transfer = 2; // a bare gamma has no CICP code point; treated as unspecified
+                } else transfer = r.u32(ENUM);
+                r.u32(ENUM); // rendering intent
+                if (colourSpace !== 2) colorDescription = cicp(primaries, transfer);
+              }
             }
           }
         }
@@ -687,6 +733,7 @@ function inspectJxl(b: Uint8Array): HeaderInfo {
   if (uncertain) metadata.bitDepthUncertain = true;
   // libjxl applies the orientation itself while decoding, so we record it only for display.
   if (orientation !== undefined && orientation !== 1) metadata.orientation = orientation;
+  if (colorDescription) metadata.colorDescription = colorDescription;
   return { format: 'jxl', width, height, metadata };
 }
 

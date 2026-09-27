@@ -1,4 +1,4 @@
-import { label } from '../capabilities';
+import { describeColor, isHdr, isSrgbLike, label } from '../capabilities';
 import { iccKindLabel } from '../metadata/icc';
 import { formatBytes, h } from './dom';
 import type { LoadedSource } from './state';
@@ -33,6 +33,7 @@ export function renderSource(src: LoadedSource): HTMLElement {
             : 'present',
     ],
     ['ICC profile', m.hasIcc ? `${m.iccDescription ? `"${m.iccDescription}" · ` : ''}${iccKindLabel(m.iccKind ?? 'unknown')}` : 'none'],
+    ...(m.colorDescription ? [['Colour', `${describeColor(m.colorDescription)}${isHdr(m.colorDescription) ? ' · HDR' : isSrgbLike(m.colorDescription) ? '' : ' · not sRGB'}`] as [string, string]] : []),
     ['XMP', m.hasXmp ? 'present' : 'none'],
     ['Decoder', `${src.info.decoder.codecId}${src.info.decoder.capabilities.exactAlpha ? ' · exact alpha' : m.hasAlpha ? ' · alpha NOT exact' : ''}`],
   ];

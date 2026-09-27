@@ -36,6 +36,13 @@ export interface PixelData {
 
 export type IccKind = 'matrix' | 'lut' | 'gray' | 'unknown';
 
+export interface ColorDescription {
+  primaries: number;
+  transfer: number;
+  matrix?: number;
+  fullRange?: boolean;
+}
+
 /**
  * What we know about a source image: container facts (from src/inspect.ts),
  * pixel-derived facts (filled after decoding), and the raw metadata payloads
@@ -71,6 +78,13 @@ export interface ImageMetadata {
   orientationApplied?: boolean;
   /** AVIF irot/imir properties present (applied by viewers, not by libavif's RGB output). */
   hasTransformProperties?: boolean;
+  /**
+   * CICP (ITU-T H.273) colour description declared by the container: AVIF `colr`/nclx,
+   * JPEG XL colour encoding, PNG `cICP`. Code points as in the spec (primaries 1 = BT.709,
+   * 9 = BT.2020, 12 = Display P3; transfer 13 = sRGB, 16 = PQ, 18 = HLG). Absent when the
+   * container says nothing, or only says "unspecified".
+   */
+  colorDescription?: ColorDescription;
   /** Animated container or multi-page file. Only the first frame/page is used. */
   isAnimated: boolean;
   /** For WebP/AVIF/JXL: the source was stored losslessly. */

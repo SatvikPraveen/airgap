@@ -7,7 +7,7 @@
  * capability fields are consulted. Unit-tested table-driven in
  * tests/unit/capabilities.test.ts.
  */
-import type { CodecCapabilities, ImageFormat, ImageMetadata } from './codecs/types';
+import type { CodecCapabilities, ColorDescription, ImageFormat, ImageMetadata } from './codecs/types';
 
 export interface SourceDescription {
   format: ImageFormat;
@@ -43,6 +43,8 @@ export type LossKind =
   | 'animation' // only the first frame / page survives
   | 'icc-convert' // pixel values changed to sRGB on purpose (appearance kept)
   | 'icc-convert-unavailable' // convert requested but profile kind is not matrix/TRC
+  | 'color-description' // CICP primaries/transfer (wide gamut, HDR) declared by the source cannot be carried
+  | 'color-convert' // the decoder converts a non-sRGB colour description to sRGB itself
   | 'exif' // EXIF removed (by choice or because the target cannot carry it)
   | 'gps' // GPS IFD removed on purpose
   | 'makernote' // MakerNote dropped whole in strip-gps mode (cannot be cleaned selectively)
@@ -204,6 +206,24 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
     }
   }
 
+  const cd = m.colorDescription;
+  if (cd && !isSrgbLike(cd)) {
+    const what = describeColor(cd);
+    if (dec.decodeAppliesIcc) {
+      losses.push({
+        kind: 'color-convert',
+        severity: 'pixels',
+        message: `The source declares ${what}. The ${label(source.format)} decoder in use converts pixels to sRGB itself and cannot be told not to${isHdr(cd) ? '; HDR values are tone-mapped' : ''}. Appearance is approximated; values change.`,
+      });
+    } else {
+      losses.push({
+        kind: 'color-description',
+        severity: 'metadata',
+        message: `The source declares ${what}. No encoder in use writes that description into the output, so viewers will interpret the unchanged pixel values as sRGB${isHdr(cd) ? ' and the HDR image will look dark and desaturated' : ' and colours will look wrong'}. Values preserved, appearance not.`,
+      });
+    }
+  }
+
   // --- metadata ---------------------------------------------------------------
 
   if (m.hasExif) {
@@ -306,6 +326,27 @@ export function isFullyLossless(losses: Loss[]): boolean {
 /** The flatten rule: alpha source into a format/codec without alpha needs an explicit background. */
 export function needsFlatten(source: SourceDescription, encoder: CodecCapabilities): boolean {
   return source.metadata.hasAlpha && !encoder.alpha;
+}
+
+const PRIMARIES: Record<number, string> = { 1: 'BT.709 (sRGB) primaries', 2: 'unspecified primaries', 4: 'BT.470M primaries', 5: 'BT.470BG primaries', 6: 'BT.601 primaries', 7: 'SMPTE 240M primaries', 8: 'generic film primaries', 9: 'BT.2020 primaries', 10: 'XYZ primaries', 11: 'DCI-P3 primaries', 12: 'Display P3 primaries', 22: 'EBU 3213 primaries' };
+const TRANSFER: Record<number, string> = { 1: 'BT.709 transfer', 2: 'unspecified transfer', 4: 'gamma 2.2 transfer', 5: 'gamma 2.8 transfer', 6: 'BT.601 transfer', 7: 'SMPTE 240M transfer', 8: 'linear transfer', 11: 'IEC 61966-2-4 transfer', 13: 'sRGB transfer', 14: 'BT.2020 10-bit transfer', 15: 'BT.2020 12-bit transfer', 16: 'PQ transfer (HDR)', 17: 'SMPTE 428 transfer', 18: 'HLG transfer (HDR)' };
+const SRGB_LIKE_PRIMARIES = new Set([1, 2]);
+const SRGB_LIKE_TRANSFER = new Set([1, 2, 6, 13, 14, 15]);
+
+/** True when viewers assuming sRGB will show the image as intended (close enough to need no warning). */
+export function isSrgbLike(cd: ColorDescription): boolean {
+  return SRGB_LIKE_PRIMARIES.has(cd.primaries) && SRGB_LIKE_TRANSFER.has(cd.transfer);
+}
+
+export function isHdr(cd: ColorDescription): boolean {
+  return cd.transfer === 16 || cd.transfer === 18;
+}
+
+/** e.g. "BT.2020 primaries and PQ transfer (HDR)". */
+export function describeColor(cd: ColorDescription): string {
+  const p = PRIMARIES[cd.primaries] ?? `primaries code ${cd.primaries}`;
+  const t = TRANSFER[cd.transfer] ?? `transfer code ${cd.transfer}`;
+  return `${p} and ${t}`;
 }
 
 export function label(format: ImageFormat): string {
