@@ -4,7 +4,7 @@ Airgap converts images entirely in the browser and states, before and after,
 exactly what each conversion discards. Every entry below is covered by the
 test suites, which run in Chromium, Firefox and WebKit.
 
-## Unreleased
+## 0.3.0 (2026-10-11)
 
 ### New
 - **Animated PNG (APNG)** in and out. Every frame, frame delay and the loop
