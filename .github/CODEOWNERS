@@ -1,0 +1,12 @@
+# Default owner for everything in the repository.
+*                       @SatvikPraveen
+
+# The privacy boundary: the page's Content-Security-Policy, the worker and the
+# privacy trap that proves no bytes leave the device.
+/index.html             @SatvikPraveen
+/src/worker*.ts         @SatvikPraveen
+/tests/e2e/privacy.spec.ts @SatvikPraveen
+
+# Codecs Airgap builds itself, and their checked-in outputs.
+/tools/                 @SatvikPraveen
+/vendor/                @SatvikPraveen
