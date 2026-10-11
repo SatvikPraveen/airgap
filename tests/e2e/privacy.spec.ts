@@ -17,7 +17,7 @@
  * controls below keep that check automated, including from inside a worker.
  */
 import { expect, test } from '@playwright/test';
-import { armCspRecorder, builtAssetNames, convertAndDownload, installNetworkTrap, openApp, pickFixture, selectTarget } from './helpers';
+import { armCspRecorder, builtAssetNames, convertAndDownload, installNetworkTrap, isOwnBlob, openApp, pickFixture, selectTarget } from './helpers';
 
 test('zero network requests and zero CSP violations during full conversions (codecs pre-loaded)', async ({ page }) => {
   await armCspRecorder(page);
@@ -47,6 +47,7 @@ test('zero network requests and zero CSP violations during full conversions (cod
   await convertAndDownload(page);
 
   expect(trap.requests, 'requests observed after load').toEqual([]);
+  for (const b of trap.blobReads) expect(b, 'only same-origin in-memory blob reads').toMatch(/^GET blob:http:\/\/localhost:4173\/[0-9a-f-]{36}$/);
   expect(trap.websockets, 'websockets opened after load').toEqual([]);
   expect(await trap.cspViolations(), 'CSP violations').toEqual([]);
 });
@@ -75,6 +76,7 @@ async function installNetworkTrapAllowingAssets(page: import('@playwright/test')
   const assets = builtAssetNames();
   await page.route('**/*', (route) => {
     const line = `${route.request().method()} ${route.request().url()}`;
+    if (isOwnBlob(route.request().url(), page)) return route.continue(); // in-memory object (WebKit routes these)
     seen.push(line);
     const m = /^GET http:\/\/localhost:4173\/airgap\/(assets\/[^?#]+)$/.exec(line);
     if (m && assets.has(m[1]!)) return route.continue();
@@ -108,13 +110,13 @@ test('positive control: a blob worker spawned by the page cannot fetch either', 
   expect(trap.requests.filter((r) => r.includes('example.invalid'))).toEqual([]);
 });
 
-test('the CSP: connect-src none, worker-src blob only, wasm-unsafe-eval but never unsafe-eval, no external hosts', async ({ page }) => {
+test('the CSP: connect-src none, worker-src blob and self only, wasm-unsafe-eval but never unsafe-eval, no external hosts', async ({ page }) => {
   await openApp(page);
   const csp = (await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'))!;
   expect(csp).toContain("connect-src 'none'");
   expect(csp).toContain("default-src 'none'");
-  expect(csp).toContain('worker-src blob:');
-  expect(csp).not.toMatch(/worker-src[^;]*'self'/);
+  // Exactly blob: plus the site's own files ('self' is needed by Firefox for the chunks a worker imports).
+  expect(/worker-src ([^;]*)/.exec(csp)![1]!.trim()).toBe("blob: 'self'");
   expect(csp).toMatch(/script-src 'self' 'wasm-unsafe-eval'/);
   expect(csp).not.toMatch(/'unsafe-eval'/);
   expect(csp).not.toMatch(/'unsafe-inline'/);

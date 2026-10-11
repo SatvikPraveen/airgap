@@ -174,8 +174,14 @@ export function builtAssetNames(): Set<string> {
 // ---------------------------------------------------------------- network trap
 
 export interface NetworkTrap {
-  /** Every request Playwright saw after the trap was armed, as `METHOD url`. */
+  /** Every request Playwright saw after the trap was armed, as `METHOD url`; in-memory blob: reads excluded. */
   requests: string[];
+  /**
+   * Reads of the page's own blob: URLs (previews, downloads, the worker script). WebKit reports these
+   * through the network layer; they are reads of in-memory objects and cannot leave the device. They
+   * are let through, recorded, and asserted to be same-origin blob URLs.
+   */
+  blobReads: string[];
   websockets: string[];
   /** CSP violations recorded in the page since navigation. */
   cspViolations(): Promise<string[]>;
@@ -196,6 +202,12 @@ export async function armCspRecorder(page: Page): Promise<void> {
   });
 }
 
+/** A blob: URL created by this page's own origin (an in-memory object, not a network resource). */
+export function isOwnBlob(url: string, page: Page): boolean {
+  if (!url.startsWith('blob:')) return false;
+  return url.startsWith(`blob:${new URL(page.url()).origin}/`);
+}
+
 /**
  * Arm AFTER the app is ready. From this point every request of any kind on
  * the page is recorded (the caller asserts on `requests`) and aborted so
@@ -203,18 +215,26 @@ export async function armCspRecorder(page: Page): Promise<void> {
  */
 export async function installNetworkTrap(page: Page): Promise<NetworkTrap> {
   const requests: string[] = [];
+  const blobReads: string[] = [];
   const websockets: string[] = [];
   await page.route('**/*', (route) => {
-    requests.push(`${route.request().method()} ${route.request().url()}`);
+    const line = `${route.request().method()} ${route.request().url()}`;
+    if (isOwnBlob(route.request().url(), page)) {
+      blobReads.push(line);
+      return void route.continue();
+    }
+    requests.push(line);
     void route.abort('blockedbyclient');
   });
   page.on('request', (r) => {
     const line = `${r.method()} ${r.url()}`;
+    if (isOwnBlob(r.url(), page)) return;
     if (!requests.includes(line)) requests.push(line);
   });
   page.on('websocket', (ws) => websockets.push(ws.url()));
   return {
     requests,
+    blobReads,
     websockets,
     cspViolations: () => page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations),
   };

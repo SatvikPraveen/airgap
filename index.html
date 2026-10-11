@@ -9,9 +9,14 @@
         default-src 'none'  -> nothing loads unless a directive below allows it
         img-src blob:       -> previews of the user's own in-memory images only
         manifest-src 'self' -> the web app manifest (installable, file handler), same origin
-        worker-src blob:    -> the worker is started from a blob: URL so that it
+        worker-src blob: 'self'
+                            -> the worker is started from a blob: URL so that it
                                inherits this policy; a worker started from a
-                               same-origin URL would NOT be covered by a meta CSP
+                               same-origin URL would NOT be covered by a meta CSP.
+                               'self' is there for Firefox, which checks the codec
+                               chunks the worker imports against worker-src; it
+                               admits only this site's own files. The e2e suite
+                               asserts every worker the page starts is a blob.
         'wasm-unsafe-eval'  -> lets the browser compile WebAssembly (the image
                                codecs). It does NOT permit JavaScript eval() or
                                new Function(), and it opens no network path.
@@ -20,7 +25,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob:; worker-src blob:; connect-src 'none'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob:; worker-src blob: 'self'; connect-src 'none'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
