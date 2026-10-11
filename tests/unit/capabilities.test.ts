@@ -45,10 +45,11 @@ const sources: Record<string, SourceDescription> = {
   'tiff rgb16': src('tiff', { bitDepth: 16, sourceLossless: true }),
   'tiff rgba8 associated alpha': src('tiff', { hasAlpha: true, hasTransparency: true, hasSemiTransparency: true, alphaAssociated: true, sourceLossless: true }),
   'qoi rgba partial': src('qoi', { hasAlpha: true, hasTransparency: true, hasSemiTransparency: true, sourceLossless: true }),
+  'heic 8-bit': src('heic', { sourceLossless: false }),
 };
 
 /** Probed capabilities of the wasm codec set, as the Phase 3 registry declares them (all verified). */
-const ENC: Record<ImageFormat, CodecCapabilities> = {
+const ENC: Record<Exclude<ImageFormat, 'heic'>, CodecCapabilities> = {
   png: caps({ encodeBitDepths: [8, 16] }),
   jpeg: caps({ lossless: false, alpha: false, exactAlpha: false, decodeBitDepth: 8, encodeBitDepths: [8] }),
   webp: caps({ decodeBitDepth: 8, encodeBitDepths: [8] }),
@@ -58,7 +59,8 @@ const ENC: Record<ImageFormat, CodecCapabilities> = {
   tiff: caps({ encodeBitDepths: [8, 16] }),
   qoi: caps({ decodeBitDepth: 8, encodeBitDepths: [8], metadata: { exif: false, icc: false, xmp: false } }),
 };
-const DEC = ENC;
+/** HEIC: read only, through the platform's decoder: 8-bit, alpha not exact, never verifiable. */
+const DEC: Record<ImageFormat, CodecCapabilities> = { ...ENC, heic: caps({ encode: false, lossless: false, exactAlpha: false, decodeBitDepth: 8, decodeExact: false, encodeBitDepths: [] }) };
 
 const targets: Record<string, TargetSpec> = {
   png: { format: 'png', lossless: true, ...DEFAULT_MODES },
@@ -93,6 +95,7 @@ const expected: Record<string, Record<string, LossKind[]>> = {
   'avif 10-bit alpha': { png: L(), jpeg: L(lossy, 'bit-depth', 'alpha'), 'webp lossless': L('bit-depth'), 'webp lossy': L(lossy, 'bit-depth'), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy, 'bit-depth', 'premultiplied-alpha', 'transparent-color'), 'jxl lossy': L(lossy, 'bit-depth', 'premultiplied-alpha', 'transparent-color'), tiff: L() , qoi: L('bit-depth') },
   'avif 12-bit': { png: L(), jpeg: L(lossy, 'bit-depth'), 'webp lossless': L('bit-depth'), 'webp lossy': L(lossy, 'bit-depth'), 'avif lossless': L(), 'avif lossy': L(lossy), 'jxl lossless': L(lossy, 'bit-depth'), 'jxl lossy': L(lossy, 'bit-depth'), tiff: L() , qoi: L('bit-depth') },
   'jxl 8-bit': { png: L('decoder-unverified'), jpeg: L(lossy, 'decoder-unverified'), 'webp lossless': L('decoder-unverified'), 'webp lossy': L(lossy, 'decoder-unverified'), 'avif lossless': L('decoder-unverified'), 'avif lossy': L(lossy, 'decoder-unverified'), 'jxl lossless': L(lossy, 'decoder-unverified'), 'jxl lossy': L(lossy, 'decoder-unverified'), tiff: L('decoder-unverified') , qoi: L('decoder-unverified') },
+  'heic 8-bit': { png: L('decoder-unverified'), jpeg: L(lossy, 'decoder-unverified'), 'webp lossless': L('decoder-unverified'), 'webp lossy': L(lossy, 'decoder-unverified'), 'avif lossless': L('decoder-unverified'), 'avif lossy': L(lossy, 'decoder-unverified'), 'jxl lossless': L(lossy, 'decoder-unverified'), 'jxl lossy': L(lossy, 'decoder-unverified'), tiff: L('decoder-unverified') , qoi: L('decoder-unverified') },
   'jxl unknown depth': { png: L('bit-depth-unknown', 'decoder-unverified'), jpeg: L(lossy, 'bit-depth-unknown', 'decoder-unverified'), 'webp lossless': L('bit-depth-unknown', 'decoder-unverified'), 'webp lossy': L(lossy, 'bit-depth-unknown', 'decoder-unverified'), 'avif lossless': L('bit-depth-unknown', 'decoder-unverified'), 'avif lossy': L(lossy, 'bit-depth-unknown', 'decoder-unverified'), 'jxl lossless': L(lossy, 'bit-depth-unknown', 'decoder-unverified'), 'jxl lossy': L(lossy, 'bit-depth-unknown', 'decoder-unverified'), tiff: L('bit-depth-unknown', 'decoder-unverified') , qoi: L('bit-depth-unknown', 'decoder-unverified') },
   'tiff rgb16': { png: L(), jpeg: L(lossy, 'bit-depth'), 'webp lossless': L('bit-depth'), 'webp lossy': L(lossy, 'bit-depth'), 'avif lossless': L('bit-depth'), 'avif lossy': L(lossy, 'bit-depth'), 'jxl lossless': L(lossy, 'bit-depth'), 'jxl lossy': L(lossy, 'bit-depth'), tiff: L() , qoi: L('bit-depth') },
   'tiff rgba8 associated alpha': { png: L('associated-alpha'), jpeg: L(lossy, 'alpha', 'associated-alpha'), 'webp lossless': L('associated-alpha'), 'webp lossy': L(lossy, 'associated-alpha'), 'avif lossless': L('associated-alpha'), 'avif lossy': L(lossy, 'associated-alpha'), 'jxl lossless': L(lossy, 'premultiplied-alpha', 'transparent-color', 'associated-alpha'), 'jxl lossy': L(lossy, 'premultiplied-alpha', 'transparent-color', 'associated-alpha'), tiff: L('associated-alpha') , qoi: L('associated-alpha') },
@@ -102,7 +105,7 @@ describe('computeLosses: Phase 3 matrix through verified wasm codecs', () => {
   for (const [sName, source] of Object.entries(sources)) {
     for (const [tName, target] of Object.entries(targets)) {
       it(`${sName} -> ${tName}`, () => {
-        const losses = computeLosses(source, target, { decoder: DEC[source.format], encoder: ENC[target.format] });
+        const losses = computeLosses(source, target, { decoder: DEC[source.format], encoder: ENC[target.format as Exclude<ImageFormat, 'heic'>] });
         expect(losses.map((l) => l.kind)).toEqual(expected[sName]![tName]);
         for (const l of losses) expect(l.message.length).toBeGreaterThan(20);
       });
@@ -149,7 +152,7 @@ describe('metadata modes', () => {
   const s = sources['jpeg exif+gps']!;
   const withXmp = src('jpeg', { hasExif: true, hasGps: true, hasXmp: true, orientation: 1 });
   const mode = (metadataMode: TargetSpec['metadataMode'], format: ImageFormat = 'png'): TargetSpec => ({ format, lossless: true, metadataMode, iccMode: 'strip' });
-  const pipe = (format: ImageFormat = 'png') => ({ decoder: DEC.jpeg, encoder: ENC[format] });
+  const pipe = (format: ImageFormat = 'png') => ({ decoder: DEC.jpeg, encoder: ENC[format as Exclude<ImageFormat, 'heic'>] });
 
   it('strip-all: EXIF and XMP removed', () => {
     expect(computeLosses(withXmp, mode('strip-all'), pipe()).map((l) => l.kind)).toEqual(['exif', 'xmp']);
@@ -184,7 +187,7 @@ describe('ICC modes', () => {
   const matrix = sources['jpeg icc matrix']!;
   const lut = src('jpeg', { hasIcc: true, iccKind: 'lut' });
   const t = (iccMode: TargetSpec['iccMode'], format: ImageFormat = 'png'): TargetSpec => ({ format, lossless: true, metadataMode: 'strip-all', iccMode });
-  const pipe = (format: ImageFormat = 'png') => ({ decoder: DEC.jpeg, encoder: ENC[format] });
+  const pipe = (format: ImageFormat = 'png') => ({ decoder: DEC.jpeg, encoder: ENC[format as Exclude<ImageFormat, 'heic'>] });
 
   it('strip: metadata loss stating values kept, appearance not', () => {
     const l = computeLosses(matrix, t('strip'), pipe());

@@ -7,7 +7,7 @@ import { CodecRegistry } from '../../src/codecs/registry';
 import type { ImageFormat } from '../../src/codecs/types';
 import { ENGINE, IMAGEIO } from './helpers';
 
-const EXPECTED: Record<typeof ENGINE | 'webkit-macos', Record<ImageFormat, { encoder: string; lossless: boolean; decoderExact: boolean }>> = {
+const EXPECTED: Record<typeof ENGINE | 'webkit-macos', Record<Exclude<ImageFormat, 'heic'>, { encoder: string; lossless: boolean; decoderExact: boolean }>> = {
   chromium: {
     png: { encoder: 'airgap-png', lossless: true, decoderExact: true },
     jpeg: { encoder: 'wasm-jpeg', lossless: false, decoderExact: true },
@@ -52,7 +52,7 @@ const KEY = IMAGEIO ? 'webkit-macos' : ENGINE;
 
 describe(`probe outcomes in ${KEY}`, () => {
   const registry = new CodecRegistry();
-  for (const format of ['png', 'jpeg', 'webp', 'avif', 'jxl', 'tiff', 'qoi'] as ImageFormat[]) {
+  for (const format of ['png', 'jpeg', 'webp', 'avif', 'jxl', 'tiff', 'qoi'] as Exclude<ImageFormat, 'heic'>[]) {
     it(format, async () => {
       const enc = await registry.resolve(format, 'encode');
       const dec = await registry.resolve(format, 'decode');

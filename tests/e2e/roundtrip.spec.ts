@@ -327,3 +327,21 @@ test('APNG -> animated AVIF (lossless): zero delay declared as 1 ms; frames re-r
   expect(got.durationsMs).toEqual([100, 70, 250, 1]);
   expect(got.loops).toBe(3);
 });
+
+test('HEIC source: converted where the platform can decode it, otherwise refused with the reason (Airgap ships no HEVC code)', async ({ page }) => {
+  await page.getByTestId('file-input').setInputFiles({ name: 'photo.heic', mimeType: 'image/heic', buffer: fixture('rgba-partial.heic') });
+  const error = page.getByTestId('error');
+  await expect(page.locator('[data-testid="source-facts"], [data-testid="error"]:not([hidden])')).toBeVisible({ timeout: 30_000 });
+  if (await error.isVisible()) {
+    await expect(error).toContainText('no HEIC decoder of its own');
+    await expect(error).toContainText('patent');
+    return;
+  }
+  await expect(page.locator('[data-fact="format"]')).toContainText('HEIC');
+  await selectTarget(page, 'png');
+  await expect(page.locator('[data-loss="decoder-unverified"]')).toContainText('Airgap ships no HEVC code');
+  const { bytes } = await convertAndDownload(page);
+  const out = decodePngNode(bytes);
+  expect([out.width, out.height]).toEqual([64, 48]);
+  await expect(page.getByTestId('target').locator('option[value="jxl-jpeg"]')).toBeDisabled();
+});

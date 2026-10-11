@@ -9,6 +9,7 @@ import { probeCodec } from './probe';
 import { inspect } from '../inspect';
 import { createTiffCodec } from './tiff';
 import { createQoiCodec } from './qoi';
+import { createHeicCodec } from './heic';
 import type { CapabilityTable, Codec, DecodedImage, ImageFormat, ResolvedCodec } from './types';
 
 type Loader = () => Promise<Codec>;
@@ -27,6 +28,7 @@ const LOADERS: Record<ImageFormat, Loader[]> = {
   jxl: [() => import('./wasm/jxl-oxide').then((m) => m.createJxlOxideCodec()), () => import('./wasm/jxl').then((m) => m.createWasmJxlCodec())],
   tiff: [async () => createTiffCodec()],
   qoi: [async () => createQoiCodec()],
+  heic: [async () => createHeicCodec()],
 };
 
 /**

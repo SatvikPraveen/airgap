@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /** Engines: AIRGAP_BROWSERS=chromium,firefox,webkit (default chromium). */
-const ENGINES = { chromium: devices['Desktop Chrome'], firefox: devices['Desktop Firefox'], webkit: devices['Desktop Safari'] } as const;
+const ENGINES = { chromium: devices['Desktop Chrome'], firefox: devices['Desktop Firefox'], webkit: devices['Desktop Safari'], chrome: { ...devices['Desktop Chrome'], channel: 'chrome' } } as const;
 const BROWSERS = (process.env['AIRGAP_BROWSERS'] ?? 'chromium').split(',').map((b) => b.trim()).filter((b): b is keyof typeof ENGINES => b in ENGINES);
 
 /**

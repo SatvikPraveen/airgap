@@ -8,6 +8,7 @@
  */
 import type { ColorDescription, ImageFormat, ImageMetadata } from './codecs/types';
 import { isQoi, readQoiHeader } from './codecs/qoi';
+import { alphaItem, gridLayout, heifMetadata, hvcCDepth, isHeic, itemSize, parseHeif, prop } from './codecs/heif';
 import { findEntry, parseTiffStructure, readNumber, readNumbers, TAG } from './metadata/tiff-ifd';
 
 export type HeaderMetadata = Omit<ImageMetadata, 'hasTransparency' | 'hasSemiTransparency' | 'exif' | 'icc' | 'xmp' | 'iccKind' | 'iccDescription' | 'iccConvertible'>;
@@ -23,7 +24,7 @@ export class UnsupportedFormatError extends Error {
   override name = 'UnsupportedFormatError';
 }
 
-export const FORMAT_LIST = 'PNG, JPEG, WebP, AVIF, JPEG XL, TIFF and QOI';
+export const FORMAT_LIST = 'PNG, JPEG, WebP, AVIF, JPEG XL, TIFF, QOI and HEIC (read only, where the browser can decode it)';
 const UNSUPPORTED = `Unrecognised file. Airgap reads ${FORMAT_LIST}.`;
 
 export function inspect(bytes: Uint8Array): HeaderInfo {
@@ -43,6 +44,8 @@ export function inspect(bytes: Uint8Array): HeaderInfo {
       return inspectTiff(bytes);
     case 'qoi':
       return inspectQoi(bytes);
+    case 'heic':
+      return inspectHeic(bytes);
     default:
       throw new UnsupportedFormatError(UNSUPPORTED);
   }
@@ -56,7 +59,33 @@ export function sniffFormat(bytes: Uint8Array): ImageFormat | null {
   if (isAvif(bytes)) return 'avif';
   if (isTiff(bytes)) return 'tiff';
   if (isQoi(bytes)) return 'qoi';
+  if (isHeic(bytes)) return 'heic';
   return null;
+}
+
+/** HEIC facts from Airgap's HEIF reader (sizes after rotation; depth from the first coded image). */
+function inspectHeic(b: Uint8Array): HeaderInfo {
+  const f = parseHeif(b);
+  const p = f.items.get(f.primaryId);
+  if (!p) throw new UnsupportedFormatError('HEIC file without a primary image.');
+  const grid = p.type === 'grid' ? gridLayout(f, p) : null;
+  const size = grid ? { width: grid.width, height: grid.height } : itemSize(p);
+  if (!size) throw new UnsupportedFormatError('HEIC primary image has no size property.');
+  const coded = grid ? f.items.get(grid.tiles[0]!) : p;
+  const depth = (coded && hvcCDepth(coded)) ?? 8;
+  const quarter = prop(p, 'irot') ? (prop(p, 'irot')!.data[0]! & 1) === 1 : false;
+  const md = heifMetadata(f);
+  const tiff = md.exif ? parseTiff(md.exif) : null;
+  const colr = p.props.find((x) => x.type === 'colr' && ascii(x.data, 0, 4) === 'nclx');
+  const metadata = baseMeta({ bitDepth: depth, hasAlpha: !!alphaItem(f, p.id), hasExif: !!md.exif, hasGps: !!tiff?.hasGps, hasIcc: !!md.icc, hasXmp: !!md.xmp, isAnimated: false });
+  if (tiff?.orientation !== undefined) metadata.orientation = tiff.orientation;
+  if (colr && colr.data.length >= 11) {
+    const cd = cicp(u16be(colr.data, 4), u16be(colr.data, 6), u16be(colr.data, 8), (colr.data[10]! & 0x80) !== 0);
+    if (cd) metadata.colorDescription = cd;
+  }
+  metadata.sourceLossless = false;
+  metadata.colorLayout = `HEVC${grid ? `, ${grid.rows}x${grid.columns} tile grid` : ''}, ${depth}-bit`;
+  return { format: 'heic', width: quarter ? size.height : size.width, height: quarter ? size.width : size.height, metadata };
 }
 
 function inspectQoi(b: Uint8Array): HeaderInfo {

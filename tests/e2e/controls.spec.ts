@@ -107,15 +107,15 @@ test('metadata field only shows for sources with EXIF/XMP; ICC field only with a
 test('an unsupported file shows an error and no source panel', async ({ page }) => {
   await page.getByTestId('file-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('definitely not an image') });
   await expect(page.getByTestId('error')).toBeVisible();
-  await expect(page.getByTestId('error')).toContainText('PNG, JPEG, WebP, AVIF, JPEG XL, TIFF and QOI');
+  await expect(page.getByTestId('error')).toContainText('PNG, JPEG, WebP, AVIF, JPEG XL, TIFF, QOI and HEIC');
   await expect(page.getByTestId('source-facts')).toHaveCount(0);
 });
 
 test('the file picker accepts every format the app reads (AVIF, JPEG XL and TIFF included)', async ({ page }) => {
   const accept = (await page.getByTestId('file-input').getAttribute('accept'))!;
-  for (const ext of ['.png', '.jpg', '.jpeg', '.webp', '.avif', '.jxl', '.tif', '.tiff', '.qoi']) expect(accept.split(','), ext).toContain(ext);
-  for (const mime of ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/jxl', 'image/tiff', 'image/qoi']) expect(accept.split(','), mime).toContain(mime);
-  await expect(page.getByTestId('dropzone')).toContainText('AVIF, JPEG XL, TIFF or QOI');
+  for (const ext of ['.png', '.jpg', '.jpeg', '.webp', '.avif', '.jxl', '.tif', '.tiff', '.qoi', '.heic', '.heif']) expect(accept.split(','), ext).toContain(ext);
+  for (const mime of ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/jxl', 'image/tiff', 'image/qoi', 'image/heic']) expect(accept.split(','), mime).toContain(mime);
+  await expect(page.getByTestId('dropzone')).toContainText('JPEG XL, TIFF, QOI or HEIC');
 });
 
 test('pasting an image file from the clipboard loads it', async ({ page, browserName }) => {

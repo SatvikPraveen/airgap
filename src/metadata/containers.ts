@@ -10,6 +10,7 @@ import { deflate, inflate } from 'pako';
 import type { ImageFormat } from '../codecs/types';
 import { concat } from './tiff-ifd';
 import { crc32 } from '../crc32';
+import { heifMetadata, parseHeif } from '../codecs/heif';
 
 export interface MetadataPayloads {
   exif?: Uint8Array;
@@ -32,6 +33,12 @@ export function extractMetadata(bytes: Uint8Array, format: ImageFormat): Metadat
       return extractWebp(bytes);
     case 'jxl':
       return extractJxl(bytes);
+    case 'heic':
+      try {
+        return heifMetadata(parseHeif(bytes));
+      } catch {
+        return {};
+      }
     default:
       return {};
   }

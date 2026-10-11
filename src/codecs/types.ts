@@ -1,7 +1,8 @@
 /** Formats supported in Phase 3. HEIC is deliberately absent (see README). */
-export type ImageFormat = 'png' | 'jpeg' | 'webp' | 'avif' | 'jxl' | 'tiff' | 'qoi';
+/** 'heic' is read only, through the platform's own decoder (codecs/heic.ts); never a target. */
+export type ImageFormat = 'png' | 'jpeg' | 'webp' | 'avif' | 'jxl' | 'tiff' | 'qoi' | 'heic';
 
-export const FORMATS: ImageFormat[] = ['png', 'jpeg', 'webp', 'avif', 'jxl', 'tiff', 'qoi'];
+export const FORMATS: ImageFormat[] = ['png', 'jpeg', 'webp', 'avif', 'jxl', 'tiff', 'qoi', 'heic'];
 
 export const MIME: Record<ImageFormat, string> = {
   png: 'image/png',
@@ -11,6 +12,7 @@ export const MIME: Record<ImageFormat, string> = {
   jxl: 'image/jxl',
   tiff: 'image/tiff',
   qoi: 'image/qoi', // not IANA-registered; the de facto type
+  heic: 'image/heic',
 };
 
 export const EXTENSION: Record<ImageFormat, string> = {
@@ -21,6 +23,7 @@ export const EXTENSION: Record<ImageFormat, string> = {
   jxl: 'jxl',
   tiff: 'tif',
   qoi: 'qoi',
+  heic: 'heic',
 };
 
 /**

@@ -411,3 +411,95 @@ describe('JPEG recompression and animated AVIF through the real pipeline', () =>
     });
   });
 });
+
+describe('HEIC, read through the platform decoder (Airgap ships no HEVC code)', () => {
+  const { viaWebCodecs, HEIC_UNAVAILABLE } = await_import();
+  function await_import() {
+    return { viaWebCodecs: (b: Uint8Array) => import('../../src/codecs/heic').then((m) => m.viaWebCodecs(b)), HEIC_UNAVAILABLE: import('../../src/codecs/heic').then((m) => m.HEIC_UNAVAILABLE) };
+  }
+  async function reference(name: string) {
+    const { PNG_DECODE } = { PNG_DECODE: (await registry.resolve('png', 'decode')).codec };
+    return (await PNG_DECODE.decode(await fixtureBytes(name))).pixels;
+  }
+  const maxDiff = (a: ArrayLike<number>, b: ArrayLike<number>, skipAlpha = false) => {
+    let m = 0;
+    for (let i = 0; i < a.length; i++) if (!(skipAlpha && i % 4 === 3)) m = Math.max(m, Math.abs(a[i]! - b[i]!));
+    return m;
+  };
+  // Measured against Apple's own decode (sips): Airgap's WebCodecs path is within 4 levels (Chrome
+  // mean 0.4, Safari mean 1.2); Safari's image decoder within 8 (it upsamples chroma differently).
+  // HEVC decoders may legitimately differ this much; the loss list says HEIC is decoder-unverified.
+  const TOL = 8;
+  it('rgb8.heic: decoded by this engine (or refused with the reason), within 8 levels of Apple\'s own decode', async (ctx) => {
+    const reg = new CodecRegistry();
+    let decoded;
+    try {
+      decoded = await reg.decode('heic', await fixtureBytes('rgb8.heic'));
+    } catch (err) {
+      expect((err as Error).message).toContain(await HEIC_UNAVAILABLE);
+      return ctx.skip('no platform HEIC decoder in this engine (refused with the stated reason)');
+    }
+    expect([decoded.image.pixels.width, decoded.image.pixels.height]).toEqual([64, 48]);
+    expect(decoded.used.resolved.capabilities.decodeExact).toBe(false);
+    expect(maxDiff(decoded.image.pixels.data, (await reference('rgb8.heic.apple.png')).data, true)).toBeLessThanOrEqual(TOL);
+  });
+  it('rgba-partial.heic: the alpha plane is applied (within 8 levels of Apple\'s decode, alpha included)', async (ctx) => {
+    let px;
+    try {
+      px = (await new CodecRegistry().decode('heic', await fixtureBytes('rgba-partial.heic'))).image.pixels;
+    } catch {
+      return ctx.skip('no platform HEIC decoder in this engine');
+    }
+    const ref = await reference('rgba-partial.heic.apple.png');
+    // Compare where alpha is high enough that premultiplied canvas rounding cannot dominate.
+    let worst = 0;
+    for (let i = 0; i < ref.data.length; i += 4) {
+      worst = Math.max(worst, Math.abs(px.data[i + 3]! - ref.data[i + 3]!));
+      if (ref.data[i + 3]! >= 128) for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(px.data[i + c]! - ref.data[i + c]!));
+    }
+    expect(worst).toBeLessThanOrEqual(TOL);
+  });
+  it('WebCodecs path (Airgap reads the HEIF grid, the platform decodes each HEVC tile): grid.heic tiles land in place', async (ctx) => {
+    const ok = typeof VideoDecoder !== 'undefined' && (await VideoDecoder.isConfigSupported({ codec: 'hvc1.1.6.L93.B0' })).supported;
+    if (!ok) return ctx.skip('no HEVC in WebCodecs here');
+    const px = await viaWebCodecs(await fixtureBytes('grid.heic'));
+    expect([px.width, px.height]).toEqual([1100, 600]);
+    const src = await reference('grid.heic.source.png');
+    // Lossy HEVC: mean error small everywhere, and each tile's colour band where it belongs.
+    let sum = 0;
+    for (let i = 0; i < src.data.length; i += 4) for (let c = 0; c < 3; c++) sum += Math.abs(px.data[i + c]! - src.data[i + c]!);
+    expect(sum / (1100 * 600 * 3)).toBeLessThan(3); // lossy HEVC against the original source
+    for (const [x, y] of [[100, 100], [700, 100], [1050, 550], [600, 560]]) {
+      const i = (y! * 1100 + x!) * 4;
+      expect(Math.abs(px.data[i + 2]! - src.data[i + 2]!), `tile colour at ${x},${y}`).toBeLessThanOrEqual(8);
+    }
+  });
+  it('both paths agree where both exist (Safari): WebCodecs + Airgap HEIF vs the browser image decoder', async (ctx) => {
+    let image;
+    try {
+      const bmp = await createImageBitmap(new Blob([(await fixtureBytes('rgba-partial.heic')) as BlobPart], { type: 'image/heic' }));
+      bmp.close();
+      image = true;
+    } catch {
+      image = false;
+    }
+    const wc = typeof VideoDecoder !== 'undefined' && (await VideoDecoder.isConfigSupported({ codec: 'hvc1.1.6.L93.B0' })).supported;
+    if (!image || !wc) return ctx.skip('this engine has at most one of the two paths');
+    const a = (await new CodecRegistry().decode('heic', await fixtureBytes('rgba-partial.heic'))).image.pixels; // image decoder first
+    const b = await viaWebCodecs(await fixtureBytes('rgba-partial.heic'));
+    let worst = 0;
+    for (let i = 0; i < a.data.length; i += 4) {
+      worst = Math.max(worst, Math.abs(a.data[i + 3]! - b.data[i + 3]!));
+      if (a.data[i + 3]! >= 128) for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(a.data[i + c]! - b.data[i + c]!));
+    }
+    expect(worst).toBeLessThanOrEqual(TOL);
+  });
+  it('WebCodecs path vs Apple\'s decode: within 4 levels (Airgap converts YUV itself, matrix from the HEIF colr, range from the frame)', async (ctx) => {
+    const ok = typeof VideoDecoder !== 'undefined' && (await VideoDecoder.isConfigSupported({ codec: 'hvc1.1.6.L93.B0' })).supported;
+    if (!ok) return ctx.skip('no HEVC in WebCodecs here');
+    for (const name of ['rgb8', 'rgba-partial']) {
+      const px = await viaWebCodecs(await fixtureBytes(`${name}.heic`));
+      expect(maxDiff(px.data, (await reference(`${name}.heic.apple.png`)).data), name).toBeLessThanOrEqual(4);
+    }
+  });
+});

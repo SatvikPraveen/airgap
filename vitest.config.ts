@@ -6,7 +6,10 @@ import { wasmBase64 } from './vite-plugins.ts';
  * Engines for browser mode: AIRGAP_BROWSERS=chromium,firefox,webkit (default chromium).
  * CI runs one engine per job; locally the default keeps the loop fast.
  */
-const BROWSERS = (process.env['AIRGAP_BROWSERS'] ?? 'chromium').split(',').map((b) => b.trim()).filter(Boolean) as ('chromium' | 'firefox' | 'webkit')[];
+const BROWSERS = (process.env['AIRGAP_BROWSERS'] ?? 'chromium').split(',').map((b) => b.trim()).filter(Boolean) as ('chromium' | 'firefox' | 'webkit' | 'chrome')[];
+
+/** 'chrome' is Google Chrome (Playwright's chrome channel): unlike open-source Chromium it can decode HEVC. */
+const instance = (b: (typeof BROWSERS)[number]) => (b === 'chrome' ? { browser: 'chromium' as const, name: 'chrome', provider: playwright({ launchOptions: { channel: 'chrome' } }) } : { browser: b });
 
 export default defineConfig({
   plugins: [wasmBase64()],
@@ -31,7 +34,7 @@ export default defineConfig({
             enabled: true,
             headless: true,
             provider: playwright(),
-            instances: BROWSERS.map((browser) => ({ browser })),
+            instances: BROWSERS.map(instance),
             screenshotFailures: false,
           },
         },

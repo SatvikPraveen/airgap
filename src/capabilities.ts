@@ -180,7 +180,10 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
     losses.push({
       kind: 'decoder-unverified',
       severity: 'pixels',
-      message: `The ${label(source.format)} decoder in use could not be shown to reproduce pixel values exactly in this browser (its round trip with the matching encoder was not identical), so the output cannot be called lossless.`,
+      message:
+        source.format === 'heic'
+          ? "HEIC is decoded by your browser's or operating system's own HEVC decoder (Airgap ships no HEVC code). There is no independent HEVC decoder in the browser to check it against, and HEVC decoders may differ by a few levels, so the output cannot be called lossless. Decoding is 8-bit."
+          : `The ${label(source.format)} decoder in use could not be shown to reproduce pixel values exactly in this browser (its round trip with the matching encoder was not identical), so the output cannot be called lossless.`,
     });
   }
 
@@ -493,5 +496,7 @@ export function label(format: ImageFormat): string {
       return 'TIFF';
     case 'qoi':
       return 'QOI';
+    case 'heic':
+      return 'HEIC';
   }
 }

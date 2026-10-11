@@ -24,7 +24,8 @@
         "image/avif": [".avif"],
         "image/jxl": [".jxl"],
         "image/tiff": [".tif", ".tiff"],
-        "image/qoi": [".qoi"]
+        "image/qoi": [".qoi"],
+        "image/heic": [".heic", ".heif"]
       }
     }
   ]
