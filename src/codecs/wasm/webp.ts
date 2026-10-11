@@ -1,5 +1,7 @@
 /** WebP via @jsquash/webp (libwebp). Lossless with `exact: 1` so RGB under alpha 0 survives. */
 import { injectMetadata } from '../../metadata/containers';
+import { alphaStats } from '../../pixels';
+import { decodeAnimatedWebp, encodeAnimatedWebp, isAnimatedWebp } from '../webp-anim';
 import type { Codec, EncodeOptions } from '../types';
 import { asDecoded, buildMetadata, compileWasm, defaults, fromImageData, initEmscripten, u8view, type Bytes } from './shared';
 
@@ -32,9 +34,28 @@ export async function createWasmWebpCodec(): Promise<Codec> {
       decodeAppliesIcc: false,
       encodeBitDepths: [8],
       metadata: { exif: true, icc: true, xmp: true },
+      animation: true,
     },
     async decode(bytes) {
       const m = await decoder();
+      if (isAnimatedWebp(bytes)) {
+        // Every frame through libwebp's still decoder, composited as libwebp's animation decoder does.
+        const animation = (await decodeAnimatedWebp(bytes, async (still) => {
+          const f = m.decode(still);
+          if (!f) throw new Error('libwebp could not decode a frame of this animated WebP.');
+          return fromImageData(f);
+        }))!;
+        const pixels = animation.frames[0]!.pixels;
+        const metadata = buildMetadata(bytes, 'webp', pixels);
+        if (metadata.hasAlpha) {
+          for (const f of animation.frames) {
+            const st = alphaStats(f.pixels);
+            metadata.hasTransparency ||= st.hasTransparency;
+            metadata.hasSemiTransparency ||= st.hasSemiTransparency;
+          }
+        }
+        return { pixels, metadata, animation };
+      }
       const img = m.decode(bytes);
       if (!img) throw new Error('libwebp could not decode this WebP (animated WebP is not supported by this decoder).');
       const pixels = fromImageData(img);
@@ -46,9 +67,12 @@ export async function createWasmWebpCodec(): Promise<Codec> {
       const options = opts.lossless
         ? { ...defaults, lossless: 1, exact: 1, quality: 100, method: 4 }
         : { ...defaults, lossless: 0, exact: 1, quality: Math.round(Math.min(1, Math.max(0, opts.quality ?? 0.9)) * 100) };
-      const out = mod.encode(u8view(img.pixels), img.pixels.width, img.pixels.height, options);
-      if (!out) throw new Error('libwebp encoding failed');
-      let bytes: Uint8Array = new Uint8Array(out);
+      const encodeStill = (px: typeof img.pixels) => {
+        const out = mod.encode(u8view(px), px.width, px.height, options);
+        if (!out) throw new Error('libwebp encoding failed');
+        return new Uint8Array(out);
+      };
+      let bytes: Uint8Array = img.animation ? await encodeAnimatedWebp(img.animation, async (px) => encodeStill(px), img.metadata.hasAlpha) : encodeStill(img.pixels);
       if (opts.exif || opts.icc || opts.xmp) {
         bytes = injectMetadata(bytes, 'webp', { ...(opts.exif && { exif: opts.exif }), ...(opts.icc && { icc: opts.icc }), ...(opts.xmp && { xmp: opts.xmp }) });
       }

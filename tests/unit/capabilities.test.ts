@@ -317,7 +317,7 @@ describe('unreadable (Brotli-compressed) JPEG XL metadata', () => {
 });
 
 describe('animated sources', () => {
-  const anim = (hiddenDefault: boolean) => src('png', { isAnimated: true, sourceLossless: true, animationInfo: { frames: 4, loops: 0, durationMs: 400, hiddenDefault } });
+  const anim = (hiddenDefault: boolean) => src('png', { isAnimated: true, sourceLossless: true, animationInfo: { frames: 4, loops: 0, durationMs: 400, hiddenDefault, delaysWholeMs: true } });
   const t: TargetSpec = { format: 'png', lossless: true, ...DEFAULT_MODES };
   it('decoder and encoder both handle animation (probed): nothing lost', () => {
     expect(computeLosses(anim(false), t, { decoder: caps({ animation: true }), encoder: caps({ animation: true }) })).toEqual([]);
@@ -331,5 +331,18 @@ describe('animated sources', () => {
     const l = computeLosses(anim(true), { ...t, format: 'webp' }, { decoder: caps({ animation: true }), encoder: caps() });
     expect(l[0]!.message).toMatch(/still image is not one of its frames/);
     expect(l[0]!.message).toMatch(/every animation frame is dropped/);
+  });
+});
+
+describe('animation timing precision', () => {
+  const fractional = src('png', { isAnimated: true, sourceLossless: true, animationInfo: { frames: 3, loops: 0, durationMs: 100, hiddenDefault: false, delaysWholeMs: false } });
+  const anim = { decoder: caps({ animation: true }), encoder: caps({ animation: true }) };
+  it('APNG delays like 1/30 s into WebP: every frame kept, delays rounded to whole milliseconds, and said so', () => {
+    const l = computeLosses(fractional, { format: 'webp', lossless: true, ...DEFAULT_MODES }, anim);
+    expect(l.map((x) => [x.kind, x.severity])).toEqual([['animation-timing', 'metadata']]);
+    expect(l[0]!.message).toMatch(/whole milliseconds/);
+  });
+  it('into APNG nothing is rounded', () => {
+    expect(computeLosses(fractional, { format: 'png', lossless: true, ...DEFAULT_MODES }, anim)).toEqual([]);
   });
 });

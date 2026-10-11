@@ -236,7 +236,8 @@ export async function probeCodec(codec: Codec, independentDecoder?: Codec, refer
         const bytes = await codec.encode({ ...image(f0, claimed.alpha), animation: anim }, { lossless: true });
         const dec = await codec.decode(bytes);
         const a = dec.animation;
-        ok = !!a && a.loops === 3 && a.frames.length === 3 && a.frames.every((f, i) => f.delayNum === anim.frames[i]!.delayNum && f.delayDen === anim.frames[i]!.delayDen && comparePixels(f.pixels, anim.frames[i]!.pixels).identical);
+        // Delays compared as durations (1/10 s = 100/1000 s); pixels exactly when lossless.
+        ok = !!a && a.loops === 3 && a.frames.length === 3 && a.frames.every((f, i) => f.delayNum * anim.frames[i]!.delayDen === anim.frames[i]!.delayNum * f.delayDen && (!lossless || comparePixels(f.pixels, anim.frames[i]!.pixels).identical));
       } catch (err) {
         notes.push(`animation probe threw: ${(err as Error).message}`);
       }

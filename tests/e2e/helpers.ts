@@ -107,6 +107,14 @@ export async function decodeApngNode(bytes: Buffer): Promise<{ frames: Uint8Arra
   return { frames: UPNG.toRGBA8(img).map((b) => new Uint8Array(b)), delaysMs: img.frames.map((f) => f.delay), plays: img.tabs.acTL?.num_plays ?? -1 };
 }
 
+/** Animated WebP frames in Node with libwebp's own WebPAnimDecoder (wasm-webp, independent of the app). */
+export async function decodeWebpAnimNode(bytes: Buffer): Promise<{ frames: Uint8Array[]; durations: number[] }> {
+  const factory = (await import('wasm-webp/dist/esm/webp-wasm.js' as string)).default as (o: object) => Promise<{ decodeAnimation(d: Uint8Array, a: boolean): { data: Uint8Array; duration: number }[] }>;
+  const m = await factory({ wasmBinary: readFileSync(fileURLToPath(import.meta.resolve('wasm-webp/dist/esm/webp-wasm.wasm'))) });
+  const frames = m.decodeAnimation(new Uint8Array(bytes), true);
+  return { frames: frames.map((f) => new Uint8Array(f.data)), durations: frames.map((f) => f.duration) };
+}
+
 /** Decode QOI in Node with the reference implementation (qoi.h via @jsquash/qoi), sharing no code with the app's codec. */
 export async function decodeQoiNode(bytes: Buffer): Promise<Raster> {
   (globalThis as unknown as { ImageData: unknown }).ImageData ??= class {

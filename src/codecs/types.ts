@@ -100,7 +100,7 @@ export interface ImageMetadata {
   /** Animated container or multi-page file. */
   isAnimated: boolean;
   /** APNG facts from the header, for display and the memory guard. */
-  animationInfo?: { frames: number; loops: number; durationMs: number; hiddenDefault: boolean };
+  animationInfo?: { frames: number; loops: number; durationMs: number; hiddenDefault: boolean; /** every delay is a whole number of milliseconds */ delaysWholeMs: boolean };
   /** For WebP/AVIF/JXL: the source was stored losslessly. */
   sourceLossless?: boolean;
   /** How samples are laid out in the container, for display: e.g. "palette (43 colours), 8-bit". */

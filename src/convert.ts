@@ -12,6 +12,7 @@ import { convertToSrgb, parseIcc } from './metadata/icc';
 import { applyOrientation } from './orientation';
 import { alphaStats, comparePixels, convertBitDepth, diffMask, maxValue, type PixelComparison } from './pixels';
 import { applyTransform, isIdentity, type TransformSpec } from './transform';
+import { delayToMs } from './codecs/webp-anim';
 
 export interface ConversionPlan {
   target: TargetSpec;
@@ -133,8 +134,15 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
     return out;
   };
   const pixels = process(source.pixels);
+  // WebP stores whole milliseconds and a 16-bit loop count: plan for exactly what it can hold
+  // (the loss list says so when that changes anything), so verification checks the plan.
+  const msOnly = target.format === 'webp';
   const animation: Animation | undefined = animate
-    ? { ...source.animation!, frames: source.animation!.frames.map((f) => ({ ...f, pixels: process(f.pixels) })) }
+    ? {
+        ...source.animation!,
+        ...(msOnly && { loops: Math.min(0xffff, source.animation!.loops) }),
+        frames: source.animation!.frames.map((f) => ({ ...f, pixels: process(f.pixels), ...(msOnly && { delayNum: delayToMs(f), delayDen: 1000 }) })),
+      }
     : undefined;
 
   let metadata = { ...m };

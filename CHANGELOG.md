@@ -14,6 +14,10 @@ test suites, which run in Chromium, Firefox and WebKit.
   list says which one. Checked against a model of the specification and the
   browsers' own APNG decoders. UPNG.js, a test-only dependency, has two
   compositing bugs, which are documented and pinned in the tests.
+- **Animated WebP** in and out, converting to and from APNG. Frames are
+  composited exactly as libwebp's animation decoder does, including its
+  integer blending, and checked against it sample for sample. A delay that
+  WebP cannot hold in whole milliseconds is listed before conversion.
 
 ## 0.2.0 (2026-10-11)
 

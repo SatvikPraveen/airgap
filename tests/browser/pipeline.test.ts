@@ -218,8 +218,8 @@ describe('APNG through the real codecs and pipeline', () => {
     expect(back.animation?.hiddenDefault).toBe(true);
     expect(Array.from(back.pixels.data.slice(0, 4))).toEqual([200, 200, 200, 255]);
   });
-  it('apng-ops.png -> WebP converts the still image only (no animation verification)', async () => {
-    const r = await run('apng-ops.png', { format: 'webp' });
+  it('apng-ops.png -> TIFF converts the still image only (no animation verification)', async () => {
+    const r = await run('apng-ops.png', { format: 'tiff' });
     expect(r.result.verification.animation).toBeUndefined();
   });
   it('a crop applies to every frame', async () => {
@@ -269,5 +269,63 @@ describe('APNG through the real codecs and pipeline', () => {
         for (let c2 = 0; c2 < 3; c2++) expect(Math.abs(d[k + c2]! - o[k + c2]!), `frame ${i} ch${c2} @${k / 4}`).toBeLessThanOrEqual(tol);
       }
     }
+  });
+});
+
+describe('animated WebP through the real codecs and pipeline', () => {
+  it('the wasm-webp probe demonstrates animation', async () => {
+    const enc = await registry.resolve('webp', 'encode');
+    expect(enc.resolved.capabilities.animation, enc.resolved.probe.detail).toBe(true);
+  });
+  it('webp-ops.webp -> PNG becomes an APNG with every frame, duration and the loop count verified', async () => {
+    const r = await run('webp-ops.webp', { format: 'png' });
+    expect(r.src.animation?.frames).toHaveLength(4);
+    expect(r.result.verification.animation).toEqual({ frames: 4, framesIdentical: 4, timingKept: true, loopsKept: true });
+  });
+  it('apng-ops.png -> WebP lossless keeps every frame exactly; -> WebP lossy keeps the animation and measures the loss', async () => {
+    const lossless = await run('apng-ops.png', { format: 'webp' });
+    expect(lossless.result.verification.animation).toEqual({ frames: 4, framesIdentical: 4, timingKept: true, loopsKept: true });
+    const lossy = await run('apng-ops.png', { format: 'webp', lossless: false }, { quality: 0.6 });
+    expect(lossy.result.verification.animation).toMatchObject({ frames: 4, timingKept: true, loopsKept: true });
+    expect(lossy.result.verification.identical).toBe(false);
+  });
+  it("the engine's own animated WebP decoder (ImageDecoder) agrees, within the canvas's premultiplied precision", async (ctx) => {
+    const ID = (globalThis as unknown as { ImageDecoder?: new (init: object) => { tracks: { ready: Promise<void>; selectedTrack: { frameCount: number } | null }; decode(o: object): Promise<{ image: VideoFrame }> } }).ImageDecoder;
+    if (!ID) return ctx.skip();
+    const bytes = await fixtureBytes('webp-libwebp.webp');
+    const ours = (await registry.decode('webp', bytes)).image.animation!;
+    const dec = new ID({ data: bytes, type: 'image/webp', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+    await dec.tracks.ready;
+    const n = dec.tracks.selectedTrack?.frameCount ?? 0;
+    expect(n).toBe(ours.frames.length);
+    const { width, height } = ours.frames[0]!.pixels;
+    const decoded: Uint8ClampedArray[] = [];
+    for (let i = 0; i < n; i++) {
+      const { image } = await dec.decode({ frameIndex: i });
+      const c = new OffscreenCanvas(width, height);
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(image, 0, 0);
+      image.close();
+      decoded.push(g.getImageData(0, 0, width, height).data);
+    }
+    // Calibrate on frame 0, a plain still frame with no compositing (Airgap's frame 0 equals libwebp's
+    // exactly, see tests/unit/webp-anim.test.ts): an engine whose ImageDecoder-to-canvas path cannot
+    // reproduce that within its premultiplied precision says nothing about animation, so it is skipped.
+    // Measured: WebKit on macOS drops alpha; WebKit on Linux shifts semi-transparent colour by up to 18.
+    const tolFor = (a: number) => (a === 255 ? 0 : a === 0 ? 255 : Math.ceil(255 / a));
+    const f0 = ours.frames[0]!.pixels.data;
+    const d0 = decoded[0]!;
+    for (let k = 0; k < d0.length; k += 4) {
+      const off = d0[k + 3] !== f0[k + 3] || [0, 1, 2].some((ch) => Math.abs(d0[k + ch]! - f0[k + ch]!) > tolFor(f0[k + 3]!));
+      if (off) return ctx.skip("this engine's ImageDecoder output does not reproduce even a still frame precisely");
+    }
+    decoded.forEach((d, i) => {
+      const o = ours.frames[i]!.pixels.data;
+      for (let k = 0; k < d.length; k += 4) {
+        expect(d[k + 3], `frame ${i} alpha @${k / 4}`).toBe(o[k + 3]);
+        const tol = tolFor(o[k + 3]!);
+        for (let ch = 0; ch < 3; ch++) expect(Math.abs(d[k + ch]! - o[k + ch]!), `frame ${i} ch${ch} @${k / 4}`).toBeLessThanOrEqual(tol);
+      }
+    });
   });
 });

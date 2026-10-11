@@ -137,6 +137,7 @@ under alpha 0, compared with a plain `===` after decoding the output again.
 | WebP lossless, AVIF lossless sources to any lossless target | **yes** | fixture decodes match the generating pattern exactly |
 | PNG 8-bit RGBA to JPEG XL lossless | **yes** | verified by jxl-oxide, which shares no code with the libjxl encoder; the downloaded file is re-decoded in Node too |
 | JPEG XL lossless sources (8-bit) to any lossless target | **yes** | jxl-oxide decodes the lossless fixture to the generating pattern exactly |
+| Animated WebP (lossless) and APNG, in any direction between them: every frame, delay and the loop count | **yes** | animated WebP frames match libwebp's own WebPAnimDecoder sample for sample; downloads re-read in Node |
 | Animated PNG (APNG) to APNG: every frame, delay and the loop count | **yes** | each composited frame decoded again and compared; downloads re-read by UPNG.js in Node; Chromium's and Firefox's own APNG decoders agree |
 | PNG 8-bit RGBA to QOI, QOI sources to any lossless target | **yes** | Airgap's QOI codec is byte-identical to the reference encoder; downloads re-decoded by the reference decoder in Node |
 | Anything through the canvas fallback with transparency | **no** | canvas is premultiplied: semi-transparent RGB rounds, RGB under alpha 0 is zeroed |
@@ -448,8 +449,41 @@ used as the oracle for the fixture, because it has two bugs, both pinned in
 - dispose PREVIOUS restores the previous frame as displayed, before that
   frame's own disposal ran.
 
-Animated WebP and AVIF sequences are not supported yet. They need codec
-builds that read and write animations.
+## Animated WebP
+
+An animated WebP converts to an animated WebP or an APNG, and the reverse,
+with every frame, every duration and the loop count kept and verified. The
+container is read and written by Airgap (`src/codecs/webp-anim.ts`); each
+frame's bitstream goes through the libwebp still codec Airgap already ships,
+so no new WebAssembly is needed.
+
+- **Reading** composites frames the way libwebp's own animation decoder does.
+  That decoder is the reference, and browsers follow it. The canvas starts
+  transparent black; the ANIM background colour is a hint libwebp ignores.
+  "Dispose to background" clears to transparent black, and blending uses
+  libwebp's integer formula, not the floating-point one in the container
+  description. Two details matter for exactness: libwebp copies fully opaque
+  source pixels instead of blending them, where the formula alone gives 254
+  for 255, and its rounding differs from the float formula by one on some
+  semi-transparent pixels.
+- **Writing** stores frame 0 whole and later frames as the changed rectangle,
+  rounded out to even offsets because the format stores them halved, without
+  blending or disposal, so frames come back exactly when lossless. Lossy
+  frames are measured like any lossy conversion.
+- **Timing:** WebP stores whole milliseconds. An APNG delay that is not a
+  whole number of milliseconds, such as 1/30 s, is rounded, and the loss list
+  says so before conversion.
+
+Evidence: libwebp's own `WebPAnimDecoder` (through `wasm-webp`, a test-only
+dependency) decodes a hand-built fixture with semi-transparent blending and
+disposal, plus a fixture written by libwebp's own animation encoder. Airgap's
+frames match it sample for sample. Writer output is read back by libwebp in
+Node, and the APNG decoders of Chromium and Firefox agree within their
+canvas precision. `wasm-webp`'s own encoder records a wrong duration for the
+last frame, so its durations are never trusted; the tests read durations
+from the file.
+
+AVIF image sequences are not supported yet.
 
 ## QOI
 
@@ -642,6 +676,7 @@ src/codecs/wasm/*.ts       @jsquash-backed PNG (decode), JPEG, WebP, AVIF, JPEG 
 src/codecs/tiff.ts         utif decode + own baseline writer
 src/codecs/qoi.ts          own QOI encoder/decoder from the specification
 src/codecs/apng.ts         own APNG reader (compositing per the spec) and writer
+src/codecs/webp-anim.ts    own animated WebP container reader/writer (libwebp-exact compositing)
 src/inspect.ts             pure header parsing for all six formats, incl. CICP colour descriptions
 src/capabilities.ts        pure: source + target + probed pipeline -> list of losses
 src/convert.ts             pure orchestration: ICC, bit depth, flatten, metadata, verification, diff mask

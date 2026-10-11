@@ -42,6 +42,7 @@ export type LossKind =
   | 'decoder-unverified' // the decoder for this source could not be shown to be exact
   | 'transform-properties' // AVIF irot/imir rotation-mirror properties are not applied
   | 'animation' // only the first frame / page survives
+  | 'animation-timing' // frame delays rounded to the target's precision (WebP: whole milliseconds)
   | 'crop' // pixels outside the crop rectangle removed on purpose; the rest copied exactly
   | 'reorient' // rotated / mirrored on purpose; every value kept, positions change
   | 'resample' // resized: every output value is interpolated
@@ -190,6 +191,14 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
       kind: 'associated-alpha',
       severity: 'pixels',
       message: 'The source stores premultiplied (associated) alpha. Airgap un-premultiplies to straight alpha for the output, which rounds the RGB of semi-transparent pixels.',
+    });
+  }
+
+  if (m.isAnimated && dec.animation && enc.animation && target.format === 'webp' && m.animationInfo && !m.animationInfo.delaysWholeMs) {
+    losses.push({
+      kind: 'animation-timing',
+      severity: 'metadata',
+      message: 'Some frame delays are not whole milliseconds (APNG stores them as fractions such as 1/30 s). WebP stores whole milliseconds, so those delays are rounded to the nearest millisecond. Every frame is kept.',
     });
   }
 

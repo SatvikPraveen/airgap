@@ -128,6 +128,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
   let durationMs = 0;
   let fctlBeforeIdat = false;
   let sawIdat = false;
+  let delaysWholeMs = true;
 
   while (off + 8 <= b.length) {
     const len = u32be(b, off);
@@ -153,6 +154,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
       const num = u16be(b, dataOff + 20);
       const den = u16be(b, dataOff + 22) || 100;
       durationMs += (1000 * num) / den;
+      if ((1000 * num) % den !== 0) delaysWholeMs = false;
     } else if (type === 'IDAT') sawIdat = true;
     else if (type === 'eXIf') {
       hasExif = true;
@@ -179,7 +181,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
   if (orientation !== undefined) metadata.orientation = orientation;
   if (colorDescription) metadata.colorDescription = colorDescription;
   metadata.colorLayout = pngLayoutLabel(colorType, bitDepth, paletteSize);
-  if (isAnimated) metadata.animationInfo = { frames: numFrames, loops: plays, durationMs: Math.round(durationMs), hiddenDefault: !fctlBeforeIdat };
+  if (isAnimated) metadata.animationInfo = { frames: numFrames, loops: plays, durationMs: Math.round(durationMs), hiddenDefault: !fctlBeforeIdat, delaysWholeMs };
   return { format: 'png', width, height, metadata };
 }
 
@@ -322,6 +324,10 @@ function inspectWebp(b: Uint8Array): HeaderInfo {
   let sourceLossless = false;
   let sawBitstream = false;
   let orientation: number | undefined;
+  let loops = 0;
+  let frames = 0;
+  let durationMs = 0;
+  let allFramesLossless = true;
 
   while (off + 8 <= b.length) {
     const type = ascii(b, off, 4);
@@ -357,12 +363,31 @@ function inspectWebp(b: Uint8Array): HeaderInfo {
       if (tiff.orientation !== undefined) orientation = tiff.orientation;
     } else if (type === 'ICCP') hasIcc = true;
     else if (type === 'XMP ') hasXmp = true;
-    else if (type === 'ANIM' || type === 'ANMF') isAnimated = true;
+    else if (type === 'ANIM') {
+      isAnimated = true;
+      if (len >= 6) loops = b[dataOff + 4]! | (b[dataOff + 5]! << 8);
+    } else if (type === 'ANMF') {
+      isAnimated = true;
+      frames++;
+      if (len >= 16) durationMs += u24le(b, dataOff + 12);
+      // The frame's bitstream chunk follows the 16-byte ANMF header (after an optional ALPH).
+      let fo = dataOff + 16;
+      let lossless = false;
+      while (fo + 8 <= dataOff + len) {
+        const t = ascii(b, fo, 4);
+        const l = u32le(b, fo + 4);
+        if (t === 'VP8L') lossless = true;
+        if (t === 'VP8L' || t === 'VP8 ') break;
+        fo += 8 + l + (l & 1);
+      }
+      if (!lossless) allFramesLossless = false;
+    }
     off = dataOff + len + (len & 1);
   }
   if (!sawBitstream && !isAnimated) throw new UnsupportedFormatError('WebP file contains no VP8/VP8L bitstream.');
-  const metadata = baseMeta({ bitDepth: 8, hasAlpha, hasExif, hasGps, hasIcc, hasXmp, isAnimated, sourceLossless });
+  const metadata = baseMeta({ bitDepth: 8, hasAlpha, hasExif, hasGps, hasIcc, hasXmp, isAnimated, sourceLossless: isAnimated ? frames > 0 && allFramesLossless : sourceLossless });
   if (orientation !== undefined) metadata.orientation = orientation;
+  if (isAnimated) metadata.animationInfo = { frames, loops, durationMs, hiddenDefault: false, delaysWholeMs: true };
   return { format: 'webp', width, height, metadata };
 }
 

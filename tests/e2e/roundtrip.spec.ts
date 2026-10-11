@@ -4,6 +4,7 @@ import { decode as decodeTiff } from 'tiff';
 import {
   assertPixelIdentical,
   decodeApngNode,
+  decodeWebpAnimNode,
   decodeJxlNode,
   decodeQoiNode,
   convertAndDownload,
@@ -254,11 +255,37 @@ test('APNG -> PNG keeps the animation: every frame, delay and the loop count, re
   expect(got.plays).toBe(3);
 });
 
-test('APNG -> WebP: the animation loss names the frame count, and a still image separate from the animation', async ({ page }) => {
+test('APNG -> a still-only target: the animation loss names the frame count, and a still image separate from the animation', async ({ page }) => {
   await pickFixture(page, 'apng-ops.png');
-  await selectTarget(page, 'webp-lossless');
+  await selectTarget(page, 'tiff');
   await expect(page.locator('[data-loss="animation"]')).toContainText('4 frames');
   await pickFixture(page, 'apng-hidden.png');
   await expect(page.locator('[data-fact="frames"]')).toContainText('still image separate from the animation');
   await expect(page.locator('[data-loss="animation"]')).toContainText('still image is not one of its frames');
+});
+
+test('animated WebP -> PNG becomes an APNG frame for frame (libwebp in Node gives the reference frames)', async ({ page }) => {
+  await pickFixture(page, 'webp-ops.webp');
+  await expect(page.locator('[data-fact="frames"]')).toHaveText('4 frames · 0.42 s per loop · plays 3 times');
+  await selectTarget(page, 'png');
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const { bytes } = await convertAndDownload(page);
+  await expect(page.getByTestId('verification')).toContainText('all 4 frames');
+  const want = await decodeWebpAnimNode(fixture('webp-ops.webp'));
+  const got = await decodeApngNode(bytes);
+  got.frames.forEach((f, i) => expect(Array.from(f), `frame ${i}`).toEqual(Array.from(want.frames[i]!)));
+  expect(got.delaysMs).toEqual(want.durations);
+  expect(got.plays).toBe(3);
+});
+
+test('APNG -> animated WebP (lossless) keeps every frame and duration, read back by libwebp in Node', async ({ page }) => {
+  await pickFixture(page, 'apng-ops.png');
+  await selectTarget(page, 'webp-lossless');
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const { bytes } = await convertAndDownload(page);
+  await expect(page.getByTestId('verification')).toContainText('all 4 frames');
+  const got = await decodeWebpAnimNode(bytes);
+  const want = P.apngOpsExpectedFrames();
+  got.frames.forEach((f, i) => expect(Array.from(f), `frame ${i}`).toEqual(Array.from(want[i]!)));
+  expect(got.durations).toEqual([100, 70, 250, 0]);
 });

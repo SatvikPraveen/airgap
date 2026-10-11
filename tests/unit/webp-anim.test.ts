@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Animation, PixelData } from '../../src/codecs/types';
 import { blendNonPremult, decodeAnimatedWebp, delaysFitMs, delayToMs, encodeAnimatedWebp, parseAnimatedWebp } from '../../src/codecs/webp-anim';
+import { inspect } from '../../src/inspect';
 import { probeImage } from '../../src/pixels';
 import { fixture } from './helpers';
 
@@ -65,6 +66,8 @@ describe('animated WebP decoding against libwebp WebPAnimDecoder', () => {
       [true, false],
     ]);
     expect(s.loops).toBe(3);
+    expect(inspect(fixture('webp-ops.webp')).metadata.animationInfo).toEqual({ frames: 4, loops: 3, durationMs: 420, hiddenDefault: false, delaysWholeMs: true });
+    expect(inspect(fixture('webp-ops.webp')).metadata.sourceLossless).toBe(true);
   });
   it("blendNonPremult reproduces libwebp's integer arithmetic (not the float formula)", () => {
     const dst = new Uint8Array([100, 50, 200, 100]);
