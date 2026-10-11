@@ -131,9 +131,11 @@ under alpha 0, compared with a plain `===` after decoding the output again.
 | AVIF 10-bit and 12-bit RGBA to AVIF lossless | **yes** | codec round trips |
 | TIFF 8/16-bit (straight alpha) to PNG/WebP/AVIF/TIFF | **yes** | fixtures written by an independent writer, read by utif, verified by image-js |
 | WebP lossless, AVIF lossless sources to any lossless target | **yes** | fixture decodes match the generating pattern exactly |
-| JPEG XL, either direction | **no** | see below |
+| PNG 8-bit RGBA to JPEG XL lossless | **yes** | verified by jxl-oxide, which shares no code with the libjxl encoder; the downloaded file is re-decoded in Node too |
+| JPEG XL lossless sources (8-bit) to any lossless target | **yes** | jxl-oxide decodes the lossless fixture to the generating pattern exactly |
 | Anything through the canvas fallback with transparency | **no** | canvas is premultiplied: semi-transparent RGB rounds, RGB under alpha 0 is zeroed |
 | Any 16-bit source to WebP or JPEG XL | no, 8-bit output | flagged as `bit-depth` |
+| JPEG XL sources deeper than 8 bits | no, read as 8-bit | the decoder's depth above 8 bits is not demonstrated in the browser, so it is not claimed; flagged as `bit-depth` |
 | TIFF with associated (premultiplied) alpha | no | un-premultiplying rounds; flagged as `associated-alpha` |
 
 Round trips that are exact today are only ever *offered* as lossless after the
@@ -154,18 +156,37 @@ and Chromium's own decoder was the tie-breaker. The lesson is baked into the
 test suite: 16-bit outputs are now checked by three decoders that share no
 code.
 
-### JPEG XL is decode and lossy-encode only
+### JPEG XL: the encoder was exact all along; the old decoder was not
 
-The `@jsquash/jxl` encoder/decoder pair (a libjxl snapshot from January 2022,
-decoding through a float path) reproduces our alpha test image with a maximum
-channel difference of 1 on a handful of pixels, opaque ones included. That is
-not exact, so the probe refuses to mark it lossless and the "JPEG XL
-(lossless)" target is disabled with the reason shown. There is no independent
-JPEG XL decoder in the browser to attribute the error to one side, so
-JPEG XL *sources* also carry a `decoder-unverified` pixel loss: the output
-cannot be called lossless. If a future package fixes this, the probe will
-notice and the tests in `tests/browser/wasm-codecs.test.ts` that assert the
-current behaviour will fail, which is the intended signal.
+The `@jsquash/jxl` pair (a libjxl snapshot from January 2022) round-trips our
+probe image with a maximum channel difference of 1 on a handful of pixels,
+opaque ones included. Until now, nothing in the browser could say which side
+was wrong, so lossless JPEG XL was disabled and JPEG XL sources carried a
+`decoder-unverified` loss.
+
+Airgap now bundles [jxl-oxide](https://github.com/tirr-c/jxl-oxide), a JPEG XL
+decoder written in Rust from the specification, which shares no code with
+libjxl. It reads libjxl's lossless output of the probe image back exactly,
+every sample including the colour under alpha 0. libjxl's own decoder is
+off by one on the same bytes. The error is in the 2022 decoder, not the
+encoder. The probe now records exactly that ("the encoder is exact and its
+paired decoder is at fault"): the libjxl codec is lossless as an encoder,
+`decodeExact: false` as a decoder, and the registry uses jxl-oxide to read
+JPEG XL sources and to verify every JPEG XL output.
+
+How a decode-only codec earns trust: jxl-oxide has no encoder, so its probe
+decodes a lossless libjxl encoding of the probe image and compares it with
+the source. Two independent implementations agreeing on every sample is the
+demonstration; if either were wrong they would disagree. Only 8-bit input can
+be produced in the browser, so the probe claims 8-bit decoding and no more,
+and deeper JPEG XL sources are read at 8 bits with a `bit-depth` loss listed.
+
+Two details of the jxl-oxide path. It keeps stored values and hands the
+embedded ICC profile back instead of converting to sRGB, so JPEG XL sources
+with a profile now go through the same strip / preserve / convert choice as
+other formats. If it cannot return a profile the file declares, the file
+falls back to libjxl, which converts to sRGB and lists that as a pixel loss.
+libjxl's decoder stays in the bundle for that fallback.
 
 ### RGB under alpha 0 is a pixel loss
 
@@ -284,9 +305,10 @@ JPEG XL cannot carry any of them through the codecs in use; choosing
 "preserve" for those targets lists the loss and the post-conversion check
 reports "removed".
 
-The JPEG XL decoder applies the embedded ICC profile itself (to sRGB) and
-cannot be told not to; that conversion is reported as a pixel loss for JXL
-sources with a profile.
+JPEG XL sources are read by jxl-oxide, which keeps the stored values and
+returns the embedded ICC profile, so the ICC modes apply to them like any
+other format. Only the libjxl fallback converts to sRGB itself, and that is
+reported as a pixel loss.
 
 ## After conversion: verification and the compare view
 
@@ -419,7 +441,7 @@ next decoder is tried for that file and the source panel names the one used.
 | JPEG | @jsquash/jpeg (mozjpeg) | canvas |
 | WebP | @jsquash/webp (libwebp, `exact: 1`) | canvas |
 | AVIF | @jsquash/avif (libavif + aom), 8/10/12-bit | canvas (decode only) |
-| JPEG XL | @jsquash/jxl (libjxl snapshot), 8-bit | none |
+| JPEG XL | decode and verification: jxl-oxide (independent, from the specification); encode: @jsquash/jxl (libjxl snapshot), 8-bit | decode: libjxl, per file |
 | TIFF | utif (decode) + own baseline writer, 8/16-bit | none |
 
 The TIFF writer is uncompressed baseline, little-endian, single strip, straight
@@ -437,13 +459,13 @@ Measured with `node scripts/bundle-report.mjs` after `npm run build`
 
 | Payload | gzipped |
 | --- | --- |
-| First paint (HTML + CSS + main JS, includes the inline bootstrap worker, inspector and compare view) | 22 KB |
-| Worker module (registry, pipeline, metadata layer, PNG and TIFF writers, pako) | 32 KB |
+| First paint (HTML + CSS + main JS, includes the inline bootstrap worker, inspector, compare view, preview, batch queue, ZIP writer and transform controls) | 30 KB |
+| Worker module (registry, pipeline, metadata layer, PNG and TIFF writers, transforms, pako) | 35 KB |
 | PNG decoder (lazy) | 108 KB |
 | JPEG codec (lazy) | 177 KB |
 | WebP codec (lazy) | 228 KB |
 | TIFF (lazy, pure JS) | 28 KB |
-| JPEG XL codec (lazy) | 1.13 MB |
+| JPEG XL codecs (lazy): libjxl encoder 0.69 MB, jxl-oxide decoder 0.85 MB, libjxl decoder fallback 0.42 MB | 1.98 MB |
 | AVIF codec (lazy) | 1.95 MB |
 
 A user converting a single JPEG downloads the first two rows plus the codecs

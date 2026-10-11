@@ -169,6 +169,11 @@ closed-source project.
 - jxl-oxide-wasm 0.12.6 (2026-05-29, MIT OR Apache-2.0, 604 KB gz, no
   threads): current spec-conforming **decoder only**; output is PNG bytes
   (16-bit when the source is >8-bit, with ICC/cICP), no raw pixel accessor.
+  **Adopted in Phase 5 (2026-10-11)** as the JPEG XL decoder and verifier.
+  Measured: it decodes libjxl's lossless output of the probe image exactly,
+  while libjxl's own 2022 decoder is off by one on 4-5 pixels, which
+  attributes the long-standing JXL round-trip error to the decoder. Bundled
+  base64 in a lazy chunk it is 853 KB gz, not 604 KB (base64 overhead).
 - @saschazar/wasm-avif 2.0.1 (2022, stale, 916 KB gz): 8-bit API. Not better
   than @jsquash/avif.
 - avif.js: obsolete service-worker polyfill. No.
