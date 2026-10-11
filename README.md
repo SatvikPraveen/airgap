@@ -1,5 +1,10 @@
 # Airgap
 
+[![Deploy](https://github.com/SatvikPraveen/airgap/actions/workflows/deploy.yml/badge.svg)](https://github.com/SatvikPraveen/airgap/actions/workflows/deploy.yml)
+[![Release](https://img.shields.io/github/v/release/SatvikPraveen/airgap)](https://github.com/SatvikPraveen/airgap/releases)
+[![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+[![Live app](https://img.shields.io/badge/live-satvikpraveen.github.io%2Fairgap-informational)](https://satvikpraveen.github.io/airgap/)
+
 A static, fully client-side image format converter that tells you exactly what
 a conversion throws away before you click Convert, measures what it actually
 threw away afterwards, and shows you where.
@@ -19,8 +24,39 @@ HEIC is read only, through the browser's or operating system's own decoder;
 Airgap ships no HEVC code (see below).
 
 <p align="center">
-  <img src="docs/screenshots/converted-light.png" alt="Airgap after converting a JPEG: the source facts, the live quality preview, the transform controls, the loss list, the verification result and the heat map of changed pixels" width="720" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/converted-dark.png" />
+    <img src="docs/screenshots/converted-light.png" alt="Airgap after converting a JPEG: the source facts, the live quality preview, the transform controls, the loss list, the verification result and the heat map of changed pixels" width="720" />
+  </picture>
 </p>
+
+## Contents
+
+- [Why this exists](#why-this-exists)
+- [Verify the privacy claim yourself](#verify-the-privacy-claim-yourself)
+- [What is provably lossless](#what-is-provably-lossless)
+- [JPEG recompression (JPEG to JPEG XL, reversible)](#jpeg-recompression-jpeg-to-jpeg-xl-reversible)
+- [PNG output layout](#png-output-layout)
+- [Metadata and colour](#metadata-and-colour)
+- [After conversion: verification and the compare view](#after-conversion-verification-and-the-compare-view)
+- [Three engines, measured](#three-engines-measured)
+- [Live quality preview](#live-quality-preview)
+- [Animated PNG (APNG)](#animated-png-apng)
+- [Animated WebP](#animated-webp)
+- [Animated AVIF (image sequences)](#animated-avif-image-sequences)
+- [QOI](#qoi)
+- [HEIC (read only, through the platform's own decoder)](#heic-read-only-through-the-platforms-own-decoder)
+- [Optimise PNG further (oxipng)](#optimise-png-further-oxipng)
+- [Crop, rotate, mirror, resize](#crop-rotate-mirror-resize)
+- [Batch conversion](#batch-conversion)
+- [Limits and recovery](#limits-and-recovery)
+- [Codec selection](#codec-selection)
+- [Bundle size](#bundle-size)
+- [Development](#development)
+- [Deploy](#deploy)
+- [Changes](#changes)
+- [Contributing and security](#contributing-and-security)
+- [Licence](#licence)
 
 ## Why this exists
 
@@ -125,7 +161,9 @@ Most converters silently destroy data. Airgap:
    grep index.html checksums.txt
    ```
 
-## What is provably lossless (measured by the test suites in Chromium, Firefox and WebKit)
+## What is provably lossless
+
+Every row below is measured by the test suites in Chromium, Firefox and WebKit.
 
 Exact means every sample of every pixel, R, G, B and A, including RGB stored
 under alpha 0, compared with a plain `===` after decoding the output again.
@@ -154,7 +192,7 @@ probe has demonstrated them in the running browser.
 
 ### The 16-bit PNG byte-order bug, and why an independent writer matters
 
-Until Phase 4 every 16-bit PNG Airgap wrote was byte-swapped. The Rust
+Before release 0.1.0 every 16-bit PNG Airgap wrote was byte-swapped. The Rust
 encoder copies the sample bytes it is given straight into the file, and the
 app handed it native little-endian samples, so every other reader saw wrong
 values. It went unnoticed because the whole 16-bit chain was consistently
@@ -562,6 +600,52 @@ cannot carry EXIF, ICC or XMP, and the loss list says so when you ask to
 preserve them. A file declaring QOI's "all channels linear" colourspace gets
 the same colour-description warning as any other non-sRGB source.
 
+## HEIC (read only, through the platform's own decoder)
+
+HEIC is what iPhones save, and most people want it converted to JPEG, PNG or
+AVIF. Airgap reads HEIC but ships no HEVC code, so the legal position does not
+change. HEVC is covered by patent pools that license per implementation, and
+the usual open-source decoder (libde265) is LGPL-3.0. The codec survey
+([docs/codec-survey.md](docs/codec-survey.md)) excluded bundling it for those reasons, and
+that still holds. Instead, every HEIC pixel is decoded by the licensed
+decoder that comes with the user's browser or operating system. Two paths
+are tried in order:
+
+1. **The browser's image decoder.** Safari decodes HEIC itself, and Apple's
+   decoder does the work.
+2. **WebCodecs, the platform's HEVC video decoder.** A HEIC file is a HEIF
+   container, close to AVIF, holding HEVC-coded tiles. Airgap reads the
+   container itself (`src/codecs/heif.ts`): primary item, per-item
+   properties, item locations, tile grids, the alpha plane, rotation and
+   mirroring. It hands each coded tile to the browser's `VideoDecoder`. It
+   then converts YUV to RGB itself, using the matrix from the file's `colr`
+   property and the range the decoder reports for its buffer. Chrome on
+   macOS hands back video-range buffers for full-range images, so trusting
+   either source alone gives errors of about 30 levels.
+
+Where it works, measured: Safari, by both paths, and Google Chrome where the
+system provides HEVC decoding (macOS, and Windows with HEVC support), by
+WebCodecs. Open-source Chromium and Firefox have neither, and Airgap says so
+plainly when a HEIC file is dropped there.
+
+What it does not claim:
+- **Never encoded.** HEIC is not offered as a target.
+- **Never called lossless.** There is no independent HEVC decoder in the
+  browser to cross-check against, so every HEIC source carries the
+  `decoder-unverified` pixel loss with that reason. Decoding is 8-bit, and
+  alpha goes through a canvas, so it is not exact either.
+
+Evidence: fixtures written by Apple's own encoder (macOS `sips`), including a
+2×3 tile grid and an image with an alpha plane. Each decode is compared with
+Apple's own decode of the same file. Airgap's WebCodecs path is within 4
+levels (mean 0.4 in Chrome, 1.2 in Safari), and Safari's image decoder is
+within 8, because it upsamples chroma differently. The grid's tiles land
+where they belong. Engines without a decoder skip those tests with the
+reason, and the e2e test checks the refusal message there.
+
+This is a practical engineering position, not legal advice: relying on the
+platform's licensed decoder is the standard way web apps handle HEIC.
+
 ## Optimise PNG further (oxipng)
 
 For a PNG target, an optional step runs [oxipng](https://github.com/shssoichiro/oxipng)
@@ -650,52 +734,6 @@ in Node and decodes every entry with pngjs against its source.
   Airgap registers as a handler for the six image types, so the OS can open a
   file with it; the file arrives in memory exactly like a drop.
 
-## HEIC (read only, through the platform's own decoder)
-
-HEIC is what iPhones save, and most people want it converted to JPEG, PNG or
-AVIF. Airgap reads HEIC but ships no HEVC code, so the legal position does not
-change. HEVC is covered by patent pools that license per implementation, and
-the usual open-source decoder (libde265) is LGPL-3.0. The codec survey
-([docs/codec-survey.md](docs/codec-survey.md)) excluded bundling it for those reasons, and
-that still holds. Instead, every HEIC pixel is decoded by the licensed
-decoder that comes with the user's browser or operating system. Two paths
-are tried in order:
-
-1. **The browser's image decoder.** Safari decodes HEIC itself, and Apple's
-   decoder does the work.
-2. **WebCodecs, the platform's HEVC video decoder.** A HEIC file is a HEIF
-   container, close to AVIF, holding HEVC-coded tiles. Airgap reads the
-   container itself (`src/codecs/heif.ts`): primary item, per-item
-   properties, item locations, tile grids, the alpha plane, rotation and
-   mirroring. It hands each coded tile to the browser's `VideoDecoder`. It
-   then converts YUV to RGB itself, using the matrix from the file's `colr`
-   property and the range the decoder reports for its buffer. Chrome on
-   macOS hands back video-range buffers for full-range images, so trusting
-   either source alone gives errors of about 30 levels.
-
-Where it works, measured: Safari, by both paths, and Google Chrome where the
-system provides HEVC decoding (macOS, and Windows with HEVC support), by
-WebCodecs. Open-source Chromium and Firefox have neither, and Airgap says so
-plainly when a HEIC file is dropped there.
-
-What it does not claim:
-- **Never encoded.** HEIC is not offered as a target.
-- **Never called lossless.** There is no independent HEVC decoder in the
-  browser to cross-check against, so every HEIC source carries the
-  `decoder-unverified` pixel loss with that reason. Decoding is 8-bit, and
-  alpha goes through a canvas, so it is not exact either.
-
-Evidence: fixtures written by Apple's own encoder (macOS `sips`), including a
-2×3 tile grid and an image with an alpha plane. Each decode is compared with
-Apple's own decode of the same file. Airgap's WebCodecs path is within 4
-levels (mean 0.4 in Chrome, 1.2 in Safari), and Safari's image decoder is
-within 8, because it upsamples chroma differently. The grid's tiles land
-where they belong. Engines without a decoder skip those tests with the
-reason, and the e2e test checks the refusal message there.
-
-This is a practical engineering position, not legal advice: relying on the
-platform's licensed decoder is the standard way web apps handle HEIC.
-
 ## Codec selection
 
 Every format has an ordered list of codecs; the first whose probe demonstrates
@@ -773,14 +811,16 @@ src/codecs/probe.ts        runtime capability probe (pure: codec API only)
 src/codecs/registry.ts     per-format ordered codecs, lazy loading, per-file fallback
 src/codecs/canvas.ts       browser canvas fallback (exactAlpha: false)
 src/codecs/png-writer.ts   own PNG writer: minimal exact colour type, adaptive filters
-src/codecs/wasm/*.ts       @jsquash-backed PNG (decode), JPEG, WebP; libjxl.ts / libavif.ts over Airgap's own builds
+src/codecs/wasm/*.ts       @jsquash-backed PNG (decode), JPEG, WebP; libjxl.ts / libavif.ts over Airgap's own builds;
+                           jxl-oxide.ts, the independent JPEG XL decoder
+src/codecs/oxipng.ts       optional lossless PNG optimisation step
 src/codecs/tiff.ts         utif decode + own baseline writer
 src/codecs/qoi.ts          own QOI encoder/decoder from the specification
 src/codecs/apng.ts         own APNG reader (compositing per the spec) and writer
 src/codecs/heif.ts         HEIF container reader (items, properties, grids, alpha, iloc)
 src/codecs/heic.ts         HEIC via the platform decoder only: image decoder, then WebCodecs
 src/codecs/webp-anim.ts    own animated WebP container reader/writer (libwebp-exact compositing)
-src/inspect.ts             pure header parsing for all six formats, incl. CICP colour descriptions
+src/inspect.ts             pure header parsing for every format, incl. CICP colour descriptions and animation
 src/capabilities.ts        pure: source + target + probed pipeline -> list of losses
 src/convert.ts             pure orchestration: ICC, bit depth, flatten, metadata, verification, diff mask
 src/limits.ts              memory guard thresholds and messages, preview auto-run limit
@@ -820,28 +860,40 @@ that base, so nothing in the build assumes a root path.
 Two GitHub Actions workflows:
 
 - `.github/workflows/ci.yml` runs on every pull request: notices check,
-  typecheck, unit, browser and e2e suites, a production build and the bundle
-  budget. Playwright's Chromium is cached keyed on the exact Playwright
-  version in the lockfile.
+  typecheck, unit tests, a production build and the bundle budget, then the
+  browser and e2e suites once per engine (Chromium, Firefox, WebKit).
+  Playwright's browsers are cached keyed on the exact Playwright version in
+  the lockfile.
 - `.github/workflows/deploy.yml` runs on push to `main`: it calls the same
   test workflow, and only if that job succeeds does the deploy job build
   `dist/` (with the commit hash injected into the footer), check the budget,
   **attest `checksums.txt` with build provenance**, and publish with
   `actions/deploy-pages`. In the repository settings, Pages must be set to
   "GitHub Actions" as the source.
+- `.github/workflows/codecs-reproducible.yml` runs monthly and on demand: it
+  rebuilds libjxl and libavif from the pinned Dockerfiles and fails if the
+  output differs from the checked-in `vendor/` files by a single byte.
 
 ## Changes
 
 See [CHANGELOG.md](CHANGELOG.md).
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the project's rules and the checks
+a pull request must pass. Report anything that could send image data off the
+device privately, as described in [SECURITY.md](SECURITY.md).
 
 ## Licence
 
 Airgap is released under the [Apache License 2.0](LICENSE), with attribution
 in [NOTICE](NOTICE). Releases before 2026-10-11 were published under the MIT
 licence and remain available under it. The codecs it bundles are
-separate works under their own terms: Apache-2.0 (jSquash wrappers, Highway),
-BSD (mozjpeg/libjpeg-turbo, libwebp, libavif, libaom, libjxl, skcms), MIT
-(Brotli, UTIF.js, pako, Emscripten, the Rust `png` crate and wasm-bindgen)
+separate works under their own terms: Apache-2.0 (jSquash wrappers, Highway,
+libdeflater), BSD (mozjpeg/libjpeg-turbo, libwebp, libavif, libaom, libjxl,
+skcms), MIT (Brotli, UTIF.js, pako, Emscripten, oxipng, libdeflate),
+MIT or Apache-2.0 (jxl-oxide, wasm-bindgen, the Rust `png` crate and most
+other Rust crates)
 and the Alliance for Open Media Patent License 1.0 for AV1. Every component,
 its role, and the verbatim licence text are listed in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the `licenses/`

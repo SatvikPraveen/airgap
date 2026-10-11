@@ -4,6 +4,12 @@ Airgap converts images entirely in the browser and states, before and after,
 exactly what each conversion discards. Every entry below is covered by the
 test suites, which run in Chromium, Firefox and WebKit.
 
+## Unreleased
+
+- Documentation: contents list, badges and refreshed screenshots in the
+  README (with a dark-mode variant); `CONTRIBUTING.md`, `SECURITY.md` and a
+  pull-request template; the codec survey moved to `docs/codec-survey.md`.
+
 ## 0.3.0 (2026-10-11)
 
 ### New
@@ -76,7 +82,7 @@ Releases up to and including commit d3cf05d remain available under MIT.
 
 ## 0.1.0 (2026-09-27)
 
-Phases 1 to 4: PNG, JPEG, WebP, AVIF, JPEG XL and TIFF conversion with a loss
+First release: PNG, JPEG, WebP, AVIF, JPEG XL and TIFF conversion with a loss
 list computed from probed codec capabilities, post-conversion verification
 and heat map, metadata inspector with strip-GPS, ICC matrix conversion,
 16-bit PNG and TIFF, memory guard and cancel, build provenance attestation.
