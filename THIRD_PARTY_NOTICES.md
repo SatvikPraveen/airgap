@@ -60,7 +60,7 @@ AVIF/AV1 is royalty-free under the Alliance for Open Media Patent License 1.0.
 JPEG XL's reference implementation is published by its authors under a
 patent grant contained in its BSD-style licence. Airgap deliberately does not
 ship HEIC/HEVC, whose decoding is covered by patent pools with per-implementer
-licensing; the reasoning is recorded in `docs/phase3-codec-survey.md`.
+licensing; the reasoning is recorded in `docs/codec-survey.md`.
 
 ## Keeping this file honest
 

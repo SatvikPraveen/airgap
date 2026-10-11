@@ -10,7 +10,7 @@
  * a codec loads are GETs of files that exist, by exact name, in the production
  * build's assets directory.
  *
- * Verified to be able to fail (re-verified for Phase 3): a temporary
+ * Verified to be able to fail (re-verified after the wasm codecs were added): a temporary
  * `fetch('https://example.invalid/leak-test')` in src/ui/app.ts turned the
  * conversion test red via the CSP-violation channel, and with connect-src
  * relaxed via the request channel. Both changes were reverted. The positive

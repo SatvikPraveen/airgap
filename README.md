@@ -655,8 +655,8 @@ in Node and decodes every entry with pngjs against its source.
 HEIC is what iPhones save, and most people want it converted to JPEG, PNG or
 AVIF. Airgap reads HEIC but ships no HEVC code, so the legal position does not
 change. HEVC is covered by patent pools that license per implementation, and
-the usual open-source decoder (libde265) is LGPL-3.0. The Phase 3 survey
-(`docs/phase3-codec-survey.md`) excluded bundling it for those reasons, and
+the usual open-source decoder (libde265) is LGPL-3.0. The codec survey
+([docs/codec-survey.md](docs/codec-survey.md)) excluded bundling it for those reasons, and
 that still holds. Instead, every HEIC pixel is decoded by the licensed
 decoder that comes with the user's browser or operating system. Two paths
 are tried in order:

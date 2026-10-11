@@ -1,4 +1,11 @@
-# Phase 3 codec survey (Step 1: investigate before coding)
+# Codec survey
+
+A dated research record, written before any codec was bundled and extended
+with addenda as decisions changed. "Phase" numbers refer to the stages of
+development that led to release 0.1.0 (phases 1 to 4) and 0.2.0 (phase 5).
+The current state of each codec is in the README.
+
+## Original survey (investigate before coding)
 
 Date: 2026-09-23. Deploy target: GitHub Pages (static, no COOP/COEP headers,
 so `SharedArrayBuffer` is unavailable). Page CSP today:

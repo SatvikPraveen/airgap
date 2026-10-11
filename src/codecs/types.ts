@@ -1,4 +1,4 @@
-/** Formats supported in Phase 3. HEIC is deliberately absent (see README). */
+/** Every format Airgap reads. All but HEIC are also targets. */
 /** 'heic' is read only, through the platform's own decoder (codecs/heic.ts); never a target. */
 export type ImageFormat = 'png' | 'jpeg' | 'webp' | 'avif' | 'jxl' | 'tiff' | 'qoi' | 'heic';
 

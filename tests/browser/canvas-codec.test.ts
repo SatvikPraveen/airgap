@@ -1,5 +1,5 @@
 /**
- * Canvas fallback codec, under the Phase 3 interface. Its declared
+ * Canvas fallback codec, under the codec interface. Its declared
  * exactAlpha:false must be borne out by the probe, and its metadata carrying
  * (via the container layer) must work.
  */

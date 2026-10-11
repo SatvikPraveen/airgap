@@ -115,7 +115,7 @@ describe('sniffFormat / unsupported', () => {
     expect(sniffFormat(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]))).toBeNull();
     expect(() => inspect(new Uint8Array(20))).toThrow(UnsupportedFormatError);
   });
-  it('rejects GIF and BMP (not Phase 1)', () => {
+  it('rejects GIF and BMP (unsupported)', () => {
     expect(sniffFormat(new TextEncoder().encode('GIF89a' + '\0'.repeat(20)))).toBeNull();
     expect(sniffFormat(new TextEncoder().encode('BM' + '\0'.repeat(20)))).toBeNull();
   });

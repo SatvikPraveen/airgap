@@ -1,5 +1,5 @@
 /**
- * Table-driven coverage of computeLosses() over the Phase 3 matrix: every
+ * Table-driven coverage of computeLosses() over the format matrix: every
  * source archetype x every target, through an ideal (fully verified) wasm
  * pipeline, plus the canvas fallback pipeline, plus metadata/ICC modes.
  * Codecs are never named: only capability fields go in.
@@ -48,7 +48,7 @@ const sources: Record<string, SourceDescription> = {
   'heic 8-bit': src('heic', { sourceLossless: false }),
 };
 
-/** Probed capabilities of the wasm codec set, as the Phase 3 registry declares them (all verified). */
+/** Probed capabilities of the wasm codec set, as the registry declares them (all verified). */
 const ENC: Record<Exclude<ImageFormat, 'heic'>, CodecCapabilities> = {
   png: caps({ encodeBitDepths: [8, 16] }),
   jpeg: caps({ lossless: false, alpha: false, exactAlpha: false, decodeBitDepth: 8, encodeBitDepths: [8] }),
@@ -101,7 +101,7 @@ const expected: Record<string, Record<string, LossKind[]>> = {
   'tiff rgba8 associated alpha': { png: L('associated-alpha'), jpeg: L(lossy, 'alpha', 'associated-alpha'), 'webp lossless': L('associated-alpha'), 'webp lossy': L(lossy, 'associated-alpha'), 'avif lossless': L('associated-alpha'), 'avif lossy': L(lossy, 'associated-alpha'), 'jxl lossless': L(lossy, 'premultiplied-alpha', 'transparent-color', 'associated-alpha'), 'jxl lossy': L(lossy, 'premultiplied-alpha', 'transparent-color', 'associated-alpha'), tiff: L('associated-alpha') , qoi: L('associated-alpha') },
 };
 
-describe('computeLosses: Phase 3 matrix through verified wasm codecs', () => {
+describe('computeLosses: format matrix through verified wasm codecs', () => {
   for (const [sName, source] of Object.entries(sources)) {
     for (const [tName, target] of Object.entries(targets)) {
       it(`${sName} -> ${tName}`, () => {
