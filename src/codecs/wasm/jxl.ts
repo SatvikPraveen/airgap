@@ -1,24 +1,19 @@
-/** JPEG XL via @jsquash/jxl (libjxl snapshot, 8-bit RGBA). The decoder applies orientation and ICC itself. */
+/**
+ * JPEG XL encoding (and fallback decoding) via Airgap's own libjxl 0.12.0 build (libjxl.ts):
+ * lossless and lossy, 8 and 16-bit, exact alpha, ICC in the codestream, EXIF and XMP as boxes.
+ * jxl-oxide stays the first decoder and the verifier, so libjxl's output is always checked by
+ * code that shares nothing with it.
+ */
+import { iccFacts } from '../../metadata/icc';
+import { alphaStats } from '../../pixels';
 import type { Codec, EncodeOptions } from '../types';
-import { asDecoded, buildMetadata, compileWasm, defaults, fromImageData, initEmscripten, u8view, type Bytes } from './shared';
-
-type DecModule = { decode(data: Bytes): ImageData | null };
-type EncModule = { encode(data: Bytes, width: number, height: number, options: Record<string, unknown>): Uint8Array | null };
+import { decodeJxl, encodeJxl, loadLibjxl } from './libjxl';
+import { asDecoded, buildMetadata } from './shared';
 
 export async function createWasmJxlCodec(): Promise<Codec> {
-  let dec: Promise<DecModule> | undefined;
-  let enc: Promise<{ mod: EncModule; defaults: Record<string, unknown> }> | undefined;
-  const decoder = () =>
-    (dec ??= Promise.all([import('@jsquash/jxl/codec/dec/jxl_dec.js'), import('@jsquash/jxl/codec/dec/jxl_dec.wasm?b64')]).then(
-      async ([m, { default: b64 }]) => initEmscripten<DecModule>(m.default as never, await compileWasm(b64)),
-    ));
-  const encoder = () =>
-    (enc ??= Promise.all([import('@jsquash/jxl/codec/enc/jxl_enc.js'), import('@jsquash/jxl/codec/enc/jxl_enc.wasm?b64'), import('@jsquash/jxl/meta.js')]).then(
-      async ([m, { default: b64 }, meta]) => ({ mod: await initEmscripten<EncModule>(m.default as never, await compileWasm(b64)), defaults: defaults(meta) }),
-    ));
-
+  const m = await loadLibjxl();
   return {
-    id: 'wasm-jxl',
+    id: 'libjxl',
     format: 'jxl',
     capabilities: {
       decode: true,
@@ -26,29 +21,28 @@ export async function createWasmJxlCodec(): Promise<Codec> {
       lossless: true,
       alpha: true,
       exactAlpha: true,
-      decodeBitDepth: 8,
+      decodeBitDepth: 16,
       decodeExact: true,
-      decodeAppliesIcc: true,
-      encodeBitDepths: [8],
-      metadata: { exif: false, icc: false, xmp: false },
+      decodeAppliesIcc: false,
+      encodeBitDepths: [8, 16],
+      metadata: { exif: true, icc: true, xmp: true },
     },
     async decode(bytes) {
-      const m = await decoder();
-      const img = m.decode(bytes);
-      if (!img) throw new Error('libjxl could not decode this JPEG XL file.');
-      const pixels = fromImageData(img);
-      return asDecoded(pixels, buildMetadata(bytes, 'jxl', pixels, { orientationApplied: true }));
+      const d = decodeJxl(m, bytes);
+      // Facts from the container; libjxl applies the orientation itself.
+      const metadata = buildMetadata(bytes, 'jxl', d.pixels, { orientationApplied: true });
+      if (metadata.hasIcc && d.icc) Object.assign(metadata, { icc: d.icc }, iccFacts(d.icc));
+      if (metadata.hasAlpha) Object.assign(metadata, alphaStats(d.pixels));
+      return asDecoded(d.pixels, metadata);
     },
     async encode(img, opts: EncodeOptions) {
-      if (img.pixels.bitDepth !== 8) throw new Error('JPEG XL encoder takes 8-bit input.');
-      const { mod, defaults } = await encoder();
-      const q = Math.round(Math.min(1, Math.max(0, opts.quality ?? 0.75)) * 100);
-      const options = opts.lossless
-        ? { ...defaults, lossless: true, quality: 100, lossyModular: false, lossyPalette: false }
-        : { ...defaults, lossless: false, quality: q };
-      const out = mod.encode(u8view(img.pixels), img.pixels.width, img.pixels.height, options);
-      if (!out) throw new Error('libjxl encoding failed');
-      return new Uint8Array(out);
+      return encodeJxl(m, img.pixels, img.metadata.hasAlpha, {
+        lossless: !!opts.lossless,
+        ...(opts.quality !== undefined && { quality: opts.quality }),
+        ...(opts.icc && { icc: opts.icc }),
+        ...(opts.exif && { exif: opts.exif }),
+        ...(opts.xmp && { xmp: opts.xmp }),
+      });
     },
   };
 }

@@ -74,8 +74,8 @@ describe('APNG decoding against UPNG.js', () => {
     anim.frames.forEach((f, i) => expect(Array.from(f.pixels.data), `frame ${i}`).toEqual(Array.from(ref.frames[i]!)));
   });
   it('the header inspector reports frames, plays, duration and the separate still image', () => {
-    expect(inspect(fixture('apng-ops.png')).metadata.animationInfo).toEqual({ frames: 4, loops: 3, durationMs: 100 + 70 + 250 + 0, hiddenDefault: false, delaysWholeMs: true });
-    expect(inspect(fixture('apng-hidden.png')).metadata.animationInfo).toEqual({ frames: 2, loops: 0, durationMs: 1000, hiddenDefault: true, delaysWholeMs: true });
+    expect(inspect(fixture('apng-ops.png')).metadata.animationInfo).toEqual({ frames: 4, loops: 3, durationMs: 100 + 70 + 250 + 0, hiddenDefault: false, delaysWholeMs: true, hasZeroDelay: true });
+    expect(inspect(fixture('apng-hidden.png')).metadata.animationInfo).toEqual({ frames: 2, loops: 0, durationMs: 1000, hiddenDefault: true, delaysWholeMs: true, hasZeroDelay: false });
   });
   it('a still PNG is not an animation', async () => {
     expect(parseApng(fixture('rgb8.png'))).toBeNull();

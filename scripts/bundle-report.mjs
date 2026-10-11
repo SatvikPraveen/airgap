@@ -29,7 +29,7 @@ console.log(`  = ${kb(fp)} gz total\n`);
 console.log('lazily loaded (only when a format is used):');
 const groups = {};
 for (const r of rows.filter((r) => !r.firstPaint)) {
-  const g = (r.file.match(/assets\/([a-z0-9]+)[-_.]/i)?.[1] ?? 'other').toLowerCase();
+  const g = (r.file.match(/assets\/airgap_([a-z0-9]+)/i)?.[1] ?? r.file.match(/assets\/([a-z0-9]+)[-_.]/i)?.[1] ?? "other").toLowerCase();
   (groups[g] ||= []).push(r);
 }
 for (const [g, rs] of Object.entries(groups).sort((a, b) => b[1].reduce((n, r) => n + r.gz, 0) - a[1].reduce((n, r) => n + r.gz, 0))) {

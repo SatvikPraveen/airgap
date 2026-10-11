@@ -22,7 +22,14 @@ export function renderResult(r: ConversionOutput): HTMLElement {
         : 'the source';
   let cls: string;
   let text: string;
-  if (v.animation) {
+  if (v.reconstruction) {
+    const rc = v.reconstruction;
+    cls = rc.identical ? 'identical' : 'differs';
+    const saved = 1 - r.size / rc.jpegBytes;
+    text = rc.identical
+      ? `Reversible: the JPEG rebuilt from this JPEG XL file is byte-identical to the JPEG Airgap prepared (${rc.jpegBytes.toLocaleString()} bytes, with your metadata choices applied). The JPEG XL is ${(100 * saved).toFixed(1)}% ${saved >= 0 ? 'smaller' : 'larger'}. Decoded pixels ${v.identical ? 'also match the source decode exactly' : `differ from Airgap's own JPEG decode by up to ${v.maxChannelDiff} (JPEG decoders may differ in IDCT and chroma upsampling; the coefficients are identical)`}.`
+      : 'Measured: the JPEG rebuilt from this file is NOT identical to the prepared JPEG. Do not rely on this file being reversible.';
+  } else if (v.animation) {
     const a = v.animation;
     const timing = `${a.timingKept ? 'every frame delay kept' : 'frame delays CHANGED'}, ${a.loopsKept ? 'loop count kept' : 'loop count CHANGED'}`;
     if (v.identical && a.timingKept && a.loopsKept) {

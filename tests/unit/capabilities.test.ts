@@ -346,3 +346,22 @@ describe('animation timing precision', () => {
     expect(computeLosses(fractional, { format: 'png', lossless: true, ...DEFAULT_MODES }, anim)).toEqual([]);
   });
 });
+
+describe('JPEG recompression (JPEG -> JPEG XL, reversible)', () => {
+  const t = (metadataMode: TargetSpec['metadataMode'], iccMode: TargetSpec['iccMode'] = 'preserve'): TargetSpec => ({ format: 'jxl', lossless: true, metadataMode, iccMode, jpegRecompression: true });
+  const p = { decoder: caps(), encoder: caps() };
+  const jpeg = src('jpeg', { hasExif: true, hasGps: true, hasXmp: true, hasIcc: true, iccKind: 'matrix', iccConvertible: true, orientation: 6 });
+  it('preserve everything: nothing is lost, and the orientation tag is NOT rewritten (no pixel is rotated)', () => {
+    expect(computeLosses(jpeg, t('preserve'), p)).toEqual([]);
+  });
+  it('strip GPS only: GPS and XMP go; no pixel loss of any kind', () => {
+    const l = computeLosses(jpeg, t('strip-gps'), p);
+    expect(l.map((x) => x.kind)).toEqual(['gps', 'xmp']);
+    expect(isPixelLossless(l)).toBe(true);
+    expect(l[0]!.message).toMatch(/orientation tag included, is kept/);
+  });
+  it('convert-to-sRGB is refused with a reason (it would change pixels)', () => {
+    const l = computeLosses(jpeg, t('preserve', 'convert-srgb'), p);
+    expect(l.map((x) => x.kind)).toEqual(['icc-convert-unavailable']);
+  });
+});

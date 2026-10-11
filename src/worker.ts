@@ -6,7 +6,7 @@
  */
 import { CodecRegistry } from './codecs/registry';
 import type { DecodedImage, ImageFormat } from './codecs/types';
-import { convert, prepareSource } from './convert';
+import { convert, prepareSource, recompressJpeg } from './convert';
 import { FORMAT_LIST, sniffFormat, UnsupportedFormatError } from './inspect';
 import { summarizeExif } from './metadata/exif';
 import { listExifTags } from './metadata/exif-list';
@@ -17,7 +17,8 @@ declare const self: DedicatedWorkerGlobalScope;
 const registry = new CodecRegistry();
 /** XMP is shown as text in the inspector; cap what travels to the UI. */
 const XMP_DISPLAY_LIMIT = 16 * 1024;
-const images = new Map<number, { decoded: DecodedImage; format: ImageFormat }>();
+/** The original bytes are kept too: JPEG recompression works on the file, not on decoded pixels. */
+const images = new Map<number, { decoded: DecodedImage; format: ImageFormat; bytes: Uint8Array }>();
 /** Newest preview request id seen per image; older queued requests are skipped. */
 const latestPreview = new Map<number, number>();
 
@@ -49,7 +50,7 @@ async function load(id: number, buffer: ArrayBuffer): Promise<void> {
   if (!format) throw new UnsupportedFormatError(`Unrecognised file. Airgap reads ${FORMAT_LIST}.`);
   const { image, used } = await registry.decode(format, bytes);
   const decoded = prepareSource(image);
-  images.set(id, { decoded, format });
+  images.set(id, { decoded, format, bytes });
   const { exif, icc, xmp, ...facts } = decoded.metadata;
   void icc;
   const info: SourceInfo = {
@@ -92,6 +93,16 @@ async function runPipeline(id: number, plan: Plan, isCurrent: () => boolean = ()
   // Codec loading yields to the event loop; a newer request may have arrived meanwhile.
   if (!isCurrent()) return null;
   const dec = registry.table()[entry.format]?.decode;
+  if (plan.target.jpegRecompression) {
+    if (entry.format !== 'jpeg') throw new Error('JPEG recompression needs a JPEG source.');
+    const transcoder = {
+      id: 'libjxl (JPEG recompression)',
+      toJxl: async (b: Uint8Array) => (await import('./codecs/wasm/libjxl')).jpegToJxl(await (await import('./codecs/wasm/libjxl')).loadLibjxl(), b),
+      toJpeg: async (b: Uint8Array) => (await import('./codecs/wasm/libjxl')).jxlToJpeg(await (await import('./codecs/wasm/libjxl')).loadLibjxl(), b),
+    };
+    const r = await recompressJpeg({ encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: ver.resolved.capabilities, verifier: ver.codec, transcoder }, entry.decoded, entry.bytes, plan);
+    return pack(r);
+  }
   const optimizer = plan.optimize && plan.target.format === 'png' ? { id: 'oxipng', run: (b: Uint8Array) => import('./codecs/oxipng').then((m) => m.optimisePng(b)) } : undefined;
   const result = await convert(
     { encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: dec?.capabilities ?? ver.resolved.capabilities, verifier: ver.codec, ...(optimizer && { optimizer }) },
@@ -99,6 +110,11 @@ async function runPipeline(id: number, plan: Plan, isCurrent: () => boolean = ()
     entry.format,
     plan,
   );
+  return pack(result);
+}
+
+
+function pack(result: Awaited<ReturnType<typeof convert>>): { payload: ConvertedPayload; transfer: Transferable[] } {
   const buffer = result.bytes.buffer.slice(result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength) as ArrayBuffer;
   const mask = result.diffMask ? (result.diffMask.buffer.slice(result.diffMask.byteOffset, result.diffMask.byteOffset + result.diffMask.byteLength) as ArrayBuffer) : undefined;
   const payload: ConvertedPayload = {

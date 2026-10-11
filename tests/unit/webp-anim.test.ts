@@ -66,7 +66,7 @@ describe('animated WebP decoding against libwebp WebPAnimDecoder', () => {
       [true, false],
     ]);
     expect(s.loops).toBe(3);
-    expect(inspect(fixture('webp-ops.webp')).metadata.animationInfo).toEqual({ frames: 4, loops: 3, durationMs: 420, hiddenDefault: false, delaysWholeMs: true });
+    expect(inspect(fixture('webp-ops.webp')).metadata.animationInfo).toEqual({ frames: 4, loops: 3, durationMs: 420, hiddenDefault: false, delaysWholeMs: true, hasZeroDelay: true });
     expect(inspect(fixture('webp-ops.webp')).metadata.sourceLossless).toBe(true);
   });
   it("blendNonPremult reproduces libwebp's integer arithmetic (not the float formula)", () => {

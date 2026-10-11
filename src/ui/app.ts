@@ -336,7 +336,7 @@ export function mountApp(root: HTMLElement): AppHandle {
 
   function targetSpec(key: TargetKey): TargetSpec {
     const t = TARGETS[key];
-    return { format: t.format, lossless: t.lossless, metadataMode: state.metadataMode, iccMode: state.iccMode };
+    return { format: t.format, lossless: t.lossless, metadataMode: state.metadataMode, iccMode: state.iccMode, ...(t.jpegRecompression && { jpegRecompression: true }) };
   }
 
   /** The plan Convert would run right now, or null when the target is not ready. */
@@ -374,6 +374,7 @@ export function mountApp(root: HTMLElement): AppHandle {
     if (!src || !spec) return null;
     const err = transformError(src.info.width, src.info.height, spec);
     if (err) return err;
+    if (TARGETS[state.target].jpegRecompression) return 'JPEG recompression keeps the JPEG exactly, so crop, rotation and resizing are not available with it. Reset the transform or choose another target.';
     const out = outputSize(src.info.width, src.info.height, spec);
     return sizeRefusal(out.width, out.height);
   }
@@ -418,6 +419,10 @@ export function mountApp(root: HTMLElement): AppHandle {
     const t = TARGETS[key];
     const err = state.ensureErrors[t.format];
     if (err) return `unavailable: ${err}`;
+    if (t.jpegRecompression) {
+      const infos = state.source ? [state.source.info] : batchInfos();
+      if (infos.length && infos.some((i) => i.format !== 'jpeg')) return state.batch ? 'every file must be a JPEG' : 'JPEG sources only';
+    }
     // A lossy request is lossy by definition; no probe needed to exclude it.
     if (state.losslessOnly && !t.lossless) return 'excluded by lossless-only';
     const enc = encoderCaps(t.format);
@@ -517,6 +522,10 @@ export function mountApp(root: HTMLElement): AppHandle {
     iccField.hidden = iccSources.length === 0;
     iccRadios.reset();
     const iccDisabled: Partial<Record<IccMode, string>> = {};
+    if (current.jpegRecompression) {
+      iccDisabled['convert-srgb'] = 'Not available with JPEG recompression: it keeps the JPEG exactly, and converting would change pixel values.';
+      if (state.iccMode === 'convert-srgb') state.iccMode = 'strip';
+    }
     const nonMatrix = iccSources.find((info) => !info.metadata.iccConvertible);
     if (nonMatrix) {
       const kind = nonMatrix.metadata.iccKind ?? 'unknown';

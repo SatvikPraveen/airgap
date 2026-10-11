@@ -23,19 +23,49 @@ function probeMetadata(): { exif: Uint8Array; icc: Uint8Array; xmp: Uint8Array }
     0, 0, 0, 0,
     0x70, 0x72, 0x6f, 0x62, 0x65, 0,
   ]);
-  const icc = new Uint8Array(132 + 12 + 20);
-  new DataView(icc.buffer).setUint32(0, icc.length);
-  icc.set([0x6d, 0x6e, 0x74, 0x72], 12); // 'mntr'
-  icc.set([0x52, 0x47, 0x42, 0x20], 16); // 'RGB '
-  icc.set([0x58, 0x59, 0x5a, 0x20], 20); // 'XYZ '
-  icc.set([0x61, 0x63, 0x73, 0x70], 36); // 'acsp'
-  new DataView(icc.buffer).setUint32(128, 1);
-  icc.set([0x64, 0x65, 0x73, 0x63], 132); // 'desc'
-  new DataView(icc.buffer).setUint32(136, 144);
-  new DataView(icc.buffer).setUint32(140, 20);
-  icc.set([0x64, 0x65, 0x73, 0x63, 0, 0, 0, 0, 0, 0, 0, 6, 0x70, 0x72, 0x6f, 0x62, 0x65, 0], 144);
+  const icc = probeIcc();
   const xmp = new TextEncoder().encode('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF/></x:xmpmeta>');
   return { exif, icc, xmp };
+}
+
+/**
+ * A small but VALID ICC v2 display profile (sRGB-like matrix/TRC: desc, wtpt, rXYZ/gXYZ/bXYZ,
+ * one shared gamma curve, cprt), so that encoders which parse profiles (libjxl) accept it as
+ * readily as those which store it as opaque bytes.
+ */
+function probeIcc(): Uint8Array {
+  const tags: [string, number[]][] = [];
+  const s15 = (v: number) => {
+    const n = Math.round(v * 65536) | 0;
+    return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  };
+  const xyz = (x: number, y: number, z: number) => [0x58, 0x59, 0x5a, 0x20, 0, 0, 0, 0, ...s15(x), ...s15(y), ...s15(z)];
+  const text = (t: string) => [0x74, 0x65, 0x78, 0x74, 0, 0, 0, 0, ...[...t].map((c) => c.charCodeAt(0)), 0];
+  const desc = (t: string) => [0x64, 0x65, 0x73, 0x63, 0, 0, 0, 0, 0, 0, 0, t.length + 1, ...[...t].map((c) => c.charCodeAt(0)), 0, ...new Array(4 + 4 + 2 + 1 + 67).fill(0)];
+  tags.push(['desc', desc('probe')], ['cprt', text('none')], ['wtpt', xyz(0.9642, 1, 0.8249)]);
+  tags.push(['rXYZ', xyz(0.4361, 0.2225, 0.0139)], ['gXYZ', xyz(0.3851, 0.7169, 0.0971)], ['bXYZ', xyz(0.1431, 0.0606, 0.7141)]);
+  const curve = [0x63, 0x75, 0x72, 0x76, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0x33]; // gamma 2.2 (u8.8)
+  tags.push(['rTRC', curve], ['gTRC', curve], ['bTRC', curve]);
+  const tableLen = 4 + tags.length * 12;
+  const data: number[] = [];
+  const table: number[] = [0, 0, 0, tags.length];
+  let off = 128 + tableLen;
+  for (const [sig, body] of tags) {
+    const padded = [...body, ...new Array((4 - (body.length % 4)) % 4).fill(0)];
+    table.push(...[...sig].map((c) => c.charCodeAt(0)), (off >>> 24) & 255, (off >>> 16) & 255, (off >>> 8) & 255, off & 255, 0, 0, (body.length >>> 8) & 255, body.length & 255);
+    data.push(...padded);
+    off += padded.length;
+  }
+  const total = 128 + tableLen + data.length;
+  const header = new Array(128).fill(0);
+  header.splice(0, 4, (total >>> 24) & 255, (total >>> 16) & 255, (total >>> 8) & 255, total & 255);
+  header.splice(8, 4, 2, 0x10, 0, 0); // version 2.1
+  header.splice(12, 4, ...[...'mntr'].map((c) => c.charCodeAt(0)));
+  header.splice(16, 4, ...[...'RGB '].map((c) => c.charCodeAt(0)));
+  header.splice(20, 4, ...[...'XYZ '].map((c) => c.charCodeAt(0)));
+  header.splice(36, 4, ...[...'acsp'].map((c) => c.charCodeAt(0)));
+  header.splice(68, 12, ...s15(0.9642), ...s15(1), ...s15(0.8249));
+  return new Uint8Array([...header, ...table, ...data]);
 }
 
 function image(px: PixelData, hasAlpha: boolean): DecodedImage {
@@ -128,14 +158,27 @@ export async function probeCodec(codec: Codec, independentDecoder?: Codec, refer
         caps.exactAlpha = claimed.exactAlpha && sameDepth && full.identical;
         check('exactAlpha', claimed.exactAlpha, caps.exactAlpha);
       }
-      // Only 8-bit input could be demonstrated (the reference encoder's depth); claim no more.
-      caps.decodeBitDepth = Math.min(claimed.decodeBitDepth, 8);
       notes.push(
         full.identical
           ? `decodes a lossless ${referenceEncoder.id} encoding of the probe image exactly (every sample${alpha ? ', RGB under alpha 0 included' : ''})`
           : `does NOT reproduce a lossless ${referenceEncoder.id} encoding of the probe image (${full.differingPixels} px differ, max diff ${full.maxChannelDiff}); one of the two is not exact`,
       );
-      notes.push(`depth above 8 bits not demonstrated (the reference encoder writes 8-bit only), so treated as 8-bit`);
+      // Deeper decoding is claimed only at depths the reference encoder can write and this decoder
+      // then reproduces exactly.
+      let demonstrated = opaqueOk ? 8 : 0;
+      for (const depth of referenceEncoder.capabilities.encodeBitDepths.filter((d) => d > 8 && d <= claimed.decodeBitDepth)) {
+        try {
+          const src = probeImage(PROBE_SIZE, depth, alpha, 0x1234567);
+          const deep = await codec.decode(await referenceEncoder.encode(image(src, alpha), { lossless: true }));
+          const ok = deep.pixels.bitDepth === depth && comparePixels(src, deep.pixels).identical;
+          check(`decode${depth}bit`, true, ok);
+          if (ok) demonstrated = depth;
+        } catch (err) {
+          notes.push(`${depth}-bit decode not demonstrated: ${(err as Error).message}`);
+        }
+      }
+      caps.decodeBitDepth = Math.min(claimed.decodeBitDepth, Math.max(8, demonstrated));
+      notes.push(caps.decodeBitDepth > 8 ? `${caps.decodeBitDepth}-bit decoding demonstrated` : 'depth above 8 bits not demonstrated, so treated as 8-bit');
     } catch (err) {
       caps.decodeExact = false;
       notes.push(`decoder not demonstrated: ${(err as Error).message}`);
@@ -232,7 +275,7 @@ export async function probeCodec(codec: Codec, independentDecoder?: Codec, refer
         const f1 = { ...f0, data: f0.data.slice() } as PixelData;
         for (let y = 2; y < 7; y++) for (let x = 3; x < 9; x++) f1.data.set([10, 200, 30, claimed.alpha ? 128 : 255], (y * PROBE_SIZE + x) * 4);
         const f2 = probeImage(PROBE_SIZE, 8, claimed.alpha, 0x52);
-        const anim = { frames: [ { pixels: f0, delayNum: 1, delayDen: 10 }, { pixels: f1, delayNum: 7, delayDen: 100 }, { pixels: f2, delayNum: 0, delayDen: 100 } ], loops: 3, hiddenDefault: false };
+        const anim = { frames: [ { pixels: f0, delayNum: 1, delayDen: 10 }, { pixels: f1, delayNum: 7, delayDen: 100 }, { pixels: f2, delayNum: 1, delayDen: 20 } ], loops: 3, hiddenDefault: false };
         const bytes = await codec.encode({ ...image(f0, claimed.alpha), animation: anim }, { lossless: true });
         const dec = await codec.decode(bytes);
         const a = dec.animation;

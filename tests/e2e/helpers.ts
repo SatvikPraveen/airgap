@@ -115,6 +115,24 @@ export async function decodeWebpAnimNode(bytes: Buffer): Promise<{ frames: Uint8
   return { frames: frames.map((f) => new Uint8Array(f.data)), durations: frames.map((f) => f.duration) };
 }
 
+/** Airgap's own libjxl build in Node: rebuild the JPEG from a recompressed JPEG XL. */
+export async function jxlToJpegNode(bytes: Buffer): Promise<Buffer | null> {
+  const factory = (await import('../../vendor/libjxl/airgap_jxl.js')).default;
+  const m = await factory({ wasmBinary: readFileSync(join(here, '..', '..', 'vendor', 'libjxl', 'airgap_jxl.wasm')) });
+  const { jxlToJpeg } = await import('../../src/codecs/wasm/libjxl');
+  const out = jxlToJpeg(m, new Uint8Array(bytes));
+  return out ? Buffer.from(out) : null;
+}
+
+/** Airgap's own libavif build in Node: every frame and its duration in milliseconds. */
+export async function decodeAvifNode(bytes: Buffer): Promise<{ frames: Uint8Array[]; durationsMs: number[]; loops: number }> {
+  const factory = (await import('../../vendor/libavif/airgap_avif.js')).default;
+  const m = await factory({ wasmBinary: readFileSync(join(here, '..', '..', 'vendor', 'libavif', 'airgap_avif.wasm')) });
+  const { decodeAvif } = await import('../../src/codecs/wasm/libavif');
+  const d = decodeAvif(m, new Uint8Array(bytes));
+  return { frames: d.frames.map((f) => new Uint8Array(f.data.buffer)), durationsMs: d.durations.map((n) => (1000 * n) / d.timescale), loops: d.loops };
+}
+
 /** Decode QOI in Node with the reference implementation (qoi.h via @jsquash/qoi), sharing no code with the app's codec. */
 export async function decodeQoiNode(bytes: Buffer): Promise<Raster> {
   (globalThis as unknown as { ImageData: unknown }).ImageData ??= class {

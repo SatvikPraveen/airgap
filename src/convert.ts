@@ -8,6 +8,7 @@ import { MIME } from './codecs/types';
 import { flattenPixels, type RGB } from './flatten';
 import { inspect } from './inspect';
 import { setExifGeometry, setOrientation, stripGps, normalizeExif } from './metadata/exif';
+import { injectMetadata } from './metadata/containers';
 import { convertToSrgb, parseIcc } from './metadata/icc';
 import { applyOrientation } from './orientation';
 import { alphaStats, comparePixels, convertBitDepth, diffMask, maxValue, type PixelComparison } from './pixels';
@@ -46,6 +47,11 @@ export interface Verification extends PixelComparison {
   comparedAgainstConverted: boolean;
   /** The baseline is the source after the geometric edit (crop, rotate, resize). */
   comparedAgainstTransformed: boolean;
+  /**
+   * JPEG recompression: the JPEG was rebuilt from the JPEG XL and compared byte for byte with the
+   * JPEG Airgap prepared (the source with the chosen metadata changes). `jpegBytes` is its size.
+   */
+  reconstruction?: { identical: boolean; jpegBytes: number };
   /**
    * Animated output: every frame was decoded again and compared, plus delays and loop count.
    * The pixel counts above are summed over frames; maxChannelDiff is over all of them.
@@ -92,6 +98,67 @@ export interface Pipeline {
   verifier: Codec;
   /** Optional lossless re-packer of the encoder's output (oxipng for PNG). */
   optimizer?: { id: string; run(bytes: Uint8Array): Promise<Uint8Array> };
+  /** JPEG <-> JPEG XL lossless recompression (libjxl), for TargetSpec.jpegRecompression. */
+  transcoder?: { id: string; toJxl(jpeg: Uint8Array): Promise<Uint8Array>; toJpeg(jxl: Uint8Array): Promise<Uint8Array | null> };
+}
+
+/**
+ * JPEG to JPEG XL by lossless recompression. The JPEG is first prepared per the metadata modes
+ * (EXIF stripped or GPS-cleaned, XMP and ICC kept or dropped, orientation tag untouched because no
+ * pixel is rotated), then recompressed. Verification rebuilds the JPEG from the JPEG XL and
+ * compares bytes; it also decodes the JPEG XL and measures its pixels against the source decode,
+ * which may differ slightly because JPEG decoders are allowed to (IDCT, chroma upsampling).
+ */
+export async function recompressJpeg(p: Pipeline, source: DecodedImage, sourceBytes: Uint8Array, plan: ConversionPlan): Promise<ConversionResult> {
+  if (!p.transcoder) throw new Error('JPEG recompression is not available in this browser.');
+  const { target } = plan;
+  const m = source.metadata;
+  if (target.iccMode === 'convert-srgb' && m.hasIcc) throw new Error('Conversion to sRGB is not available with JPEG recompression; choose preserve or strip.');
+  const exifOut = m.exif && target.metadataMode !== 'strip-all' ? (target.metadataMode === 'strip-gps' ? stripGps(m.exif) : m.exif) : undefined;
+  const xmpOut = m.xmp && target.metadataMode === 'preserve' ? m.xmp : undefined;
+  const iccOut = m.icc && target.iccMode === 'preserve' ? m.icc : undefined;
+  const untouched = target.metadataMode === 'preserve' && (target.iccMode === 'preserve' || !m.hasIcc);
+  const prepared = untouched ? sourceBytes : injectMetadata(sourceBytes, 'jpeg', { ...(exifOut && { exif: exifOut }), ...(xmpOut && { xmp: xmpOut }), ...(iccOut && { icc: iccOut }) });
+  const bytes = await p.transcoder.toJxl(prepared);
+  const rebuilt = await p.transcoder.toJpeg(bytes);
+  const identical = !!rebuilt && rebuilt.length === prepared.length && rebuilt.every((v, i) => v === prepared[i]);
+
+  const back = await p.verifier.decode(bytes);
+  const expected = convertBitDepth(source.pixels, 8);
+  const actual = convertBitDepth(back.pixels, 8);
+  const cmp = comparePixels(expected, actual);
+  const mask = cmp.identical ? undefined : diffMask(expected, actual);
+  const h = inspect(bytes).metadata;
+  const outcome = (wanted: boolean, present: boolean, hadIt: boolean): MetadataOutcome => (!hadIt ? (present ? 'unexpected' : 'absent') : wanted ? (present ? 'kept' : 'unexpected') : present ? 'unexpected' : 'removed');
+  const verification: Verification = {
+    ...cmp,
+    bitDepth: 8,
+    verifierId: p.verifier.id,
+    comparedAgainstFlattened: false,
+    comparedAgainstConverted: false,
+    comparedAgainstTransformed: false,
+    reconstruction: { identical, jpegBytes: prepared.length },
+    metadata: {
+      exif: outcome(!!exifOut, h.hasExif, m.hasExif),
+      gps: outcome(!!exifOut && target.metadataMode === 'preserve', h.hasGps, m.hasGps),
+      icc: outcome(!!iccOut, h.hasIcc, m.hasIcc),
+      xmp: outcome(!!xmpOut, h.hasXmp, m.hasXmp),
+    },
+    metadataOk: true,
+  };
+  verification.metadataOk = !Object.values(verification.metadata).includes('unexpected');
+  return {
+    bytes,
+    mime: MIME.jxl,
+    format: 'jxl',
+    bitDepth: 8,
+    encoderId: p.transcoder.id,
+    colorLayout: 'JPEG coefficients (recompressed, reversible)',
+    width: back.pixels.width,
+    height: back.pixels.height,
+    verification,
+    ...(mask && { diffMask: mask }),
+  };
 }
 
 export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: ImageFormat, plan: ConversionPlan): Promise<ConversionResult> {
@@ -137,11 +204,18 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   // WebP stores whole milliseconds and a 16-bit loop count: plan for exactly what it can hold
   // (the loss list says so when that changes anything), so verification checks the plan.
   const msOnly = target.format === 'webp';
+  // AVIF has no zero durations (libavif silently makes them one tick): plan 1 ms instead, declared.
+  const noZero = target.format === 'avif';
   const animation: Animation | undefined = animate
     ? {
         ...source.animation!,
         ...(msOnly && { loops: Math.min(0xffff, source.animation!.loops) }),
-        frames: source.animation!.frames.map((f) => ({ ...f, pixels: process(f.pixels), ...(msOnly && { delayNum: delayToMs(f), delayDen: 1000 }) })),
+        frames: source.animation!.frames.map((f) => ({
+          ...f,
+          pixels: process(f.pixels),
+          ...(msOnly && { delayNum: delayToMs(f), delayDen: 1000 }),
+          ...(noZero && f.delayNum === 0 && { delayNum: 1, delayDen: 1000 }),
+        })),
       }
     : undefined;
 

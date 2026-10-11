@@ -32,11 +32,11 @@ async function run(file: string, target: Partial<TargetSpec> & { format: ImageFo
   return { src, result, decoderId: used.resolved.codecId, encoderId: enc.resolved.codecId };
 }
 
-/** Independent tag parse. exifr has no WebP reader, so for WebP the EXIF chunk is handed to it as a bare TIFF. */
+/** Independent tag parse. exifr reads neither WebP nor JPEG XL, so their EXIF blocks are handed to it as a bare TIFF. */
 async function tags(bytes: Uint8Array): Promise<Record<string, unknown>> {
   const opts = { tiff: true, gps: true, exif: true, ifd0: true, translateKeys: true, translateValues: false, reviveValues: false, sanitize: false, mergeOutput: true };
   const format = inspect(bytes).format;
-  const input = format === 'webp' ? extractMetadata(bytes, 'webp').exif! : bytes;
+  const input = format === 'webp' || format === 'jxl' ? extractMetadata(bytes, format).exif! : bytes;
   const r = (await exifr.parse(input.slice().buffer, opts as never)) as Record<string, unknown> | undefined;
   return r ?? {};
 }
@@ -45,10 +45,11 @@ describe('registry resolution', () => {
   it('prefers the wasm codec for every format and keeps canvas as the fallback for png/jpeg/webp', async () => {
     expect((await registry.resolve('png', 'decode')).resolved.codecId).toBe('airgap-png');
     expect((await registry.resolve('png', 'encode')).resolved.codecId).toBe('airgap-png');
-    for (const f of ['jpeg', 'webp', 'avif'] as const) expect((await registry.resolve(f, 'decode')).resolved.codecId).toBe(`wasm-${f}`);
+    for (const f of ['jpeg', 'webp'] as const) expect((await registry.resolve(f, 'decode')).resolved.codecId).toBe(`wasm-${f}`);
+    expect((await registry.resolve('avif', 'decode')).resolved.codecId).toBe('libavif');
     // JPEG XL: jxl-oxide reads and verifies, libjxl encodes.
     expect((await registry.resolve('jxl', 'decode')).resolved.codecId).toBe('jxl-oxide');
-    expect((await registry.resolve('jxl', 'encode')).resolved.codecId).toBe('wasm-jxl');
+    expect((await registry.resolve('jxl', 'encode')).resolved.codecId).toBe('libjxl');
     expect((await registry.resolve('tiff', 'encode')).resolved.codecId).toBe('utif-tiff');
     const table = registry.table();
     expect(table.png?.decode?.capabilities.exactAlpha).toBe(true);
@@ -88,12 +89,15 @@ describe('metadata modes through real codecs (asserted with exifr)', () => {
       expect(inspect(all.result.bytes).metadata.hasExif).toBe(false);
     });
   }
-  it('AVIF/JXL cannot carry EXIF: preserve reports removed, verification agrees', async () => {
-    for (const format of ['avif', 'jxl'] as const) {
-      const r = await run('exif-gps.jpg', { format, metadataMode: 'preserve' });
-      expect(r.result.verification.metadata.exif).toBe('removed');
-      expect(r.result.verification.metadataOk).toBe(true);
-    }
+  it('AVIF cannot carry EXIF (preserve reports removed); JPEG XL now carries EXIF and XMP as boxes, read back exactly', async () => {
+    const a = await run('exif-gps.jpg', { format: 'avif', metadataMode: 'preserve' });
+    expect(a.result.verification.metadata.exif).toBe('removed');
+    expect(a.result.verification.metadataOk).toBe(true);
+    const j = await run('exif-gps.jpg', { format: 'jxl', metadataMode: 'preserve' });
+    expect(j.result.verification.metadata.exif).toBe('kept');
+    expect(j.result.verification.metadata.gps).toBe('kept');
+    const t = (await tags(j.result.bytes))!;
+    expect(t['Make']).toBe('Airgap Fixtures');
   });
 });
 
@@ -173,7 +177,7 @@ describe('alpha through the whole pipeline', () => {
     const enc = registry.table().jxl?.encode?.capabilities;
     expect(enc?.lossless).toBe(true);
     expect(enc?.exactAlpha).toBe(true);
-    expect(enc?.decodeExact).toBe(false); // libjxl's own decoder is the inexact side, and it is not used to read
+    expect(enc?.decodeExact).toBe(true); // libjxl 0.12's own decoder is exact too (the 2022 one was not)
     expect(r.result.verification.verifierId).toBe('jxl-oxide');
     expect(r.result.verification.identical).toBe(true);
   });
@@ -325,6 +329,84 @@ describe('animated WebP through the real codecs and pipeline', () => {
         expect(d[k + 3], `frame ${i} alpha @${k / 4}`).toBe(o[k + 3]);
         const tol = tolFor(o[k + 3]!);
         for (let ch = 0; ch < 3; ch++) expect(Math.abs(d[k + ch]! - o[k + ch]!), `frame ${i} ch${ch} @${k / 4}`).toBeLessThanOrEqual(tol);
+      }
+    });
+  });
+});
+
+describe('JPEG recompression and animated AVIF through the real pipeline', () => {
+  async function recompress(file: string, metadataMode: TargetSpec['metadataMode']) {
+    const { recompressJpeg } = await import('../../src/convert');
+    const lib = await import('../../src/codecs/wasm/libjxl');
+    const m = await lib.loadLibjxl();
+    const bytes = await fixtureBytes(file);
+    const { image } = await registry.decode('jpeg', bytes);
+    const enc = await registry.resolve('jxl', 'encode');
+    const ver = await registry.resolve('jxl', 'decode');
+    const r = await recompressJpeg(
+      { encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: ver.resolved.capabilities, verifier: ver.codec, transcoder: { id: 'libjxl', toJxl: async (b) => lib.jpegToJxl(m, b), toJpeg: async (b) => lib.jxlToJpeg(m, b) } },
+      prepareSource(image),
+      bytes,
+      { target: { format: 'jxl', lossless: true, metadataMode, iccMode: 'preserve', jpegRecompression: true } },
+    );
+    return { r, bytes, rebuilt: lib.jxlToJpeg(m, r.bytes)! };
+  }
+  it('exif-orient6.jpg, preserve: the rebuilt JPEG is the original file byte for byte; decoded upright like the source', async () => {
+    const { r, bytes, rebuilt } = await recompress('exif-orient6.jpg', 'preserve');
+    expect(r.verification.reconstruction).toEqual({ identical: true, jpegBytes: bytes.length });
+    expect(Array.from(rebuilt)).toEqual(Array.from(bytes));
+    expect([r.width, r.height]).toEqual([32, 48]);
+    expect(r.verification.metadata.exif).toBe('kept');
+  });
+  it('location-everywhere.jpg, strip GPS only: rebuilt JPEG equals the GPS-cleaned JPEG and holds no coordinates', async () => {
+    const { r, rebuilt } = await recompress('location-everywhere.jpg', 'strip-gps');
+    expect(r.verification.reconstruction?.identical).toBe(true);
+    expect(P.findLocationNeedles(rebuilt)).toEqual([]);
+    expect(P.findLocationNeedles(r.bytes)).toEqual([]);
+    expect(r.verification.metadata.gps).toBe('removed');
+  });
+  it('the libavif probe demonstrates animation', async () => {
+    const enc = await registry.resolve('avif', 'encode');
+    expect(enc.resolved.capabilities.animation, enc.resolved.probe.detail).toBe(true);
+  });
+  it('apng-ops.png -> AVIF lossless sequence: every frame exact, delays kept (the zero delay planned as 1 ms), loops kept', async () => {
+    const r = await run('apng-ops.png', { format: 'avif' });
+    expect(r.result.verification.animation).toEqual({ frames: 4, framesIdentical: 4, timingKept: true, loopsKept: true });
+    const back = await (await registry.resolve('avif', 'decode')).codec.decode(r.result.bytes);
+    expect(back.animation?.frames.map((f) => (1000 * f.delayNum) / f.delayDen)).toEqual([100, 70, 250, 1]);
+    expect(back.animation?.loops).toBe(3);
+  });
+  it('webp-libwebp.webp -> AVIF -> APNG round trip keeps every frame', async () => {
+    const a = await run('webp-libwebp.webp', { format: 'avif' });
+    expect(a.result.verification.animation?.framesIdentical).toBe(a.result.verification.animation?.frames);
+  });
+  it("the engine's own animated AVIF decoder (ImageDecoder), where it can read sequences, shows the same frames", async (ctx) => {
+    const ID = (globalThis as unknown as { ImageDecoder?: { isTypeSupported(t: string): Promise<boolean>; new (init: object): { tracks: { ready: Promise<void>; selectedTrack: { frameCount: number } | null }; decode(o: object): Promise<{ image: VideoFrame }> } } }).ImageDecoder;
+    if (!ID || !(await ID.isTypeSupported('image/avif'))) return ctx.skip('no ImageDecoder for AVIF in this engine');
+    const r = await run('apng-ops.png', { format: 'avif' });
+    const frames = (await (await registry.resolve('avif', 'decode')).codec.decode(r.result.bytes)).animation!.frames;
+    const dec = new ID({ data: r.result.bytes, type: 'image/avif', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+    await dec.tracks.ready;
+    if ((dec.tracks.selectedTrack?.frameCount ?? 0) !== 4) return ctx.skip('this engine reads AVIF sequences as stills');
+    const decoded: Uint8ClampedArray[] = [];
+    for (let i = 0; i < 4; i++) {
+      const { image } = await dec.decode({ frameIndex: i });
+      const c = new OffscreenCanvas(32, 24);
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(image, 0, 0);
+      image.close();
+      decoded.push(g.getImageData(0, 0, 32, 24).data);
+    }
+    const tolFor = (a: number) => (a === 255 ? 0 : a === 0 ? 255 : Math.ceil(255 / a));
+    const f0 = frames[0]!.pixels.data;
+    for (let k = 0; k < f0.length; k += 4) {
+      if (decoded[0]![k + 3] !== f0[k + 3] || [0, 1, 2].some((ch) => Math.abs(decoded[0]![k + ch]! - f0[k + ch]!) > tolFor(f0[k + 3]!))) return ctx.skip("this engine's ImageDecoder output does not reproduce even a still frame precisely");
+    }
+    decoded.forEach((d, i) => {
+      const o = frames[i]!.pixels.data;
+      for (let k = 0; k < d.length; k += 4) {
+        expect(d[k + 3], `frame ${i} alpha`).toBe(o[k + 3]);
+        for (let ch = 0; ch < 3; ch++) expect(Math.abs(d[k + ch]! - o[k + ch]!)).toBeLessThanOrEqual(tolFor(o[k + 3]!));
       }
     });
   });

@@ -19,7 +19,7 @@ import { createWasmWebpCodec } from '../../src/codecs/wasm/webp';
 import { inspect } from '../../src/inspect';
 import { convertBitDepth, probeImage } from '../../src/pixels';
 import * as P from '../fixtures/pattern.mjs';
-import { asImage, firstMismatch, fixtureBytes, maxChannelDiff, rasterFrom } from './helpers';
+import { asImage, ENGINE, firstMismatch, fixtureBytes, maxChannelDiff, rasterFrom } from './helpers';
 
 const codecs: Record<string, Promise<Codec>> = {
   png: createAirgapPngCodec(),
@@ -39,34 +39,35 @@ const rgba8 = () => {
 const rgba16 = () => rasterFrom(P.RGBA16, (x, y) => P.rgba16Pixel(x, y), 16);
 
 describe('probes (the same ones the app runs)', () => {
-  it('jxl: the @jsquash/jxl encoder+decoder pair is NOT exact in this browser; the probe must refuse lossless', async () => {
-    const r = await probeCodec(await codecs.jxl!);
-    console.log('[probe jxl]', r.probe.detail, JSON.stringify(r.probe.checks));
-    expect(r.probe.ok).toBe(true);
-    // Documented finding: max channel difference 1 on a handful of pixels. If this ever flips
-    // to verified, the README statement about JPEG XL must be updated.
-    expect(r.capabilities.lossless).toBe(false);
-    expect(r.capabilities.exactAlpha).toBe(false);
-    expect(r.capabilities.decodeExact).toBe(false);
-    expect(r.probe.detail).toMatch(/max diff 1\b/);
-  });
-  it('jxl + jxl-oxide: the independent decoder reads libjxl lossless output exactly, so the ENCODER is lossless and the paired decoder is at fault', async () => {
+  it('jxl (libjxl 0.12, own build): lossless and exact on its own, at 8 and 16 bits, with EXIF/ICC/XMP carried', async () => {
     const r = await probeCodec(await codecs.jxl!, await codecs['jxl-oxide']!);
-    console.log('[probe jxl, jxl-oxide independent]', r.probe.detail, JSON.stringify(r.probe.checks));
+    console.log('[probe jxl]', r.probe.detail, JSON.stringify(r.probe.checks));
     expect(r.capabilities.lossless).toBe(true);
     expect(r.capabilities.exactAlpha).toBe(true);
-    expect(r.capabilities.decodeExact).toBe(false);
+    expect(r.capabilities.decodeExact).toBe(true); // the 2022 decoder's off-by-one is gone
+    expect(r.capabilities.encodeBitDepths).toEqual([8, 16]);
+    expect(r.capabilities.metadata).toEqual({ exif: true, icc: true, xmp: true });
     expect(r.probe.checks['independentDecode']).toEqual({ claimed: true, verified: true });
-    expect(r.probe.detail).toMatch(/encoder is exact and its paired decoder is at fault/);
   });
-  it('jxl-oxide (decode only): demonstrated exact against a lossless libjxl encoding, full RGBA; depth capped at 8', async () => {
+  it('jxl-oxide (decode only): demonstrated exact against lossless libjxl encodings, full RGBA, at 16 bits where the engine allows', async () => {
     const r = await probeCodec(await codecs['jxl-oxide']!, undefined, await codecs.jxl!);
     console.log('[probe jxl-oxide]', r.probe.detail, JSON.stringify(r.probe.checks));
     expect(r.capabilities.decodeExact).toBe(true);
     expect(r.capabilities.exactAlpha).toBe(true);
-    expect(r.capabilities.decodeBitDepth).toBe(8);
     expect(r.capabilities.encode).toBe(false);
-    expect(r.probe.detail).toMatch(/RGB under alpha 0 included/);
+    // Measured: in Firefox jxl-oxide-wasm renders a 16-bit image to an 8-bit PNG, so the probe
+    // caps it at 8 there and 16-bit JPEG XL files are read by libjxl's own (exact) decoder instead.
+    expect(r.capabilities.decodeBitDepth).toBe(ENGINE === 'firefox' ? 8 : 16);
+  });
+  it('a 16-bit JPEG XL file is read at 16 bits in every engine (the registry picks a decoder that keeps the depth)', async () => {
+    const { CodecRegistry } = await import('../../src/codecs/registry');
+    const reg = new CodecRegistry();
+    const src = probeImage(16, 16, true, 3);
+    const bytes = await (await codecs.jxl!).encode(asImage(src), { lossless: true });
+    const { image, used } = await reg.decode('jxl', bytes);
+    expect(image.pixels.bitDepth).toBe(16);
+    expect(firstMismatch(image.pixels.data, src.data)).toBeNull();
+    expect(used.resolved.codecId).toBe(ENGINE === 'firefox' ? 'libjxl' : 'jxl-oxide');
   });
   it('a decode-only codec without a reference encoder stays unverified', async () => {
     const r = await probeCodec(await codecs['jxl-oxide']!);
@@ -103,14 +104,7 @@ describe('probes (the same ones the app runs)', () => {
 });
 
 describe('exact RGBA round trips (full tuple, alpha-0 pixels included)', () => {
-  it('jxl: round trip is within 1/255 but NOT identical (why it is never offered as lossless)', async () => {
-    const codec = await codecs.jxl!;
-    const src = rgba8();
-    const back = await codec.decode(await codec.encode(asImage(src), { lossless: true }));
-    expect(firstMismatch(src.data, back.pixels.data)).not.toBeNull();
-    expect(maxChannelDiff(src.data, back.pixels.data)).toBe(1);
-  });
-  for (const name of ['png', 'png-rs', 'webp', 'avif', 'tiff'] as const) {
+  for (const name of ['png', 'png-rs', 'webp', 'avif', 'jxl', 'tiff'] as const) {
     it(`${name}: rgba-partial pattern -> encode lossless -> decode is identical`, async () => {
       const codec = await codecs[name]!;
       const src = rgba8();

@@ -129,6 +129,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
   let fctlBeforeIdat = false;
   let sawIdat = false;
   let delaysWholeMs = true;
+  let hasZeroDelay = false;
 
   while (off + 8 <= b.length) {
     const len = u32be(b, off);
@@ -155,6 +156,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
       const den = u16be(b, dataOff + 22) || 100;
       durationMs += (1000 * num) / den;
       if ((1000 * num) % den !== 0) delaysWholeMs = false;
+      if (num === 0) hasZeroDelay = true;
     } else if (type === 'IDAT') sawIdat = true;
     else if (type === 'eXIf') {
       hasExif = true;
@@ -181,7 +183,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
   if (orientation !== undefined) metadata.orientation = orientation;
   if (colorDescription) metadata.colorDescription = colorDescription;
   metadata.colorLayout = pngLayoutLabel(colorType, bitDepth, paletteSize);
-  if (isAnimated) metadata.animationInfo = { frames: numFrames, loops: plays, durationMs: Math.round(durationMs), hiddenDefault: !fctlBeforeIdat, delaysWholeMs };
+  if (isAnimated) metadata.animationInfo = { frames: numFrames, loops: plays, durationMs: Math.round(durationMs), hiddenDefault: !fctlBeforeIdat, delaysWholeMs, hasZeroDelay };
   return { format: 'png', width, height, metadata };
 }
 
@@ -328,6 +330,7 @@ function inspectWebp(b: Uint8Array): HeaderInfo {
   let frames = 0;
   let durationMs = 0;
   let allFramesLossless = true;
+  let webpZeroDelay = false;
 
   while (off + 8 <= b.length) {
     const type = ascii(b, off, 4);
@@ -369,7 +372,11 @@ function inspectWebp(b: Uint8Array): HeaderInfo {
     } else if (type === 'ANMF') {
       isAnimated = true;
       frames++;
-      if (len >= 16) durationMs += u24le(b, dataOff + 12);
+      if (len >= 16) {
+        const d = u24le(b, dataOff + 12);
+        durationMs += d;
+        if (d === 0) webpZeroDelay = true;
+      }
       // The frame's bitstream chunk follows the 16-byte ANMF header (after an optional ALPH).
       let fo = dataOff + 16;
       let lossless = false;
@@ -387,7 +394,7 @@ function inspectWebp(b: Uint8Array): HeaderInfo {
   if (!sawBitstream && !isAnimated) throw new UnsupportedFormatError('WebP file contains no VP8/VP8L bitstream.');
   const metadata = baseMeta({ bitDepth: 8, hasAlpha, hasExif, hasGps, hasIcc, hasXmp, isAnimated, sourceLossless: isAnimated ? frames > 0 && allFramesLossless : sourceLossless });
   if (orientation !== undefined) metadata.orientation = orientation;
-  if (isAnimated) metadata.animationInfo = { frames, loops, durationMs, hiddenDefault: false, delaysWholeMs: true };
+  if (isAnimated) metadata.animationInfo = { frames, loops, durationMs, hiddenDefault: false, delaysWholeMs: true, hasZeroDelay: webpZeroDelay };
   return { format: 'webp', width, height, metadata };
 }
 
@@ -452,10 +459,37 @@ function inspectAvif(b: Uint8Array): HeaderInfo {
   let colorDescription: ColorDescription | undefined;
   const exifItems: number[] = [];
   let iloc: Box | undefined;
+  let avifAnimation: ImageMetadata['animationInfo'];
 
   for (const top of boxes(b, 0, b.length)) {
     if (top.type === 'ftyp') {
       for (let o = top.start; o + 4 <= top.end; o += 4) if (ascii(b, o, 4) === 'avis') isAnimated = true;
+    } else if (top.type === 'moov') {
+      // Image sequence: the first track's sample count and durations (for display and the memory guard).
+      const trak = [...boxes(b, top.start, top.end)].find((x) => x.type === 'trak');
+      const find = (box: Box | undefined, path: string[]): Box | undefined => {
+        let cur = box;
+        for (const t of path) cur = cur && [...boxes(b, cur.start, cur.end)].find((x) => x.type === t);
+        return cur;
+      };
+      const mdhd = find(trak, ['mdia', 'mdhd']);
+      const stts = find(trak, ['mdia', 'minf', 'stbl', 'stts']);
+      if (mdhd && stts) {
+        const v = b[mdhd.start]!;
+        const timescale = u32be(b, mdhd.start + (v === 1 ? 20 : 12));
+        let frames = 0;
+        let total = 0;
+        let wholeMs = true;
+        const n = u32be(b, stts.start + 4);
+        for (let i = 0; i < n && stts.start + 16 + i * 8 <= stts.end; i++) {
+          const count = u32be(b, stts.start + 8 + i * 8);
+          const delta = u32be(b, stts.start + 12 + i * 8);
+          frames += count;
+          total += count * delta;
+          if (timescale && (1000 * delta) % timescale !== 0) wholeMs = false;
+        }
+        if (timescale) avifAnimation = { frames, loops: 0, durationMs: Math.round((1000 * total) / timescale), hiddenDefault: false, delaysWholeMs: wholeMs };
+      }
     } else if (top.type === 'meta') {
       for (const m of boxes(b, fullBoxPayload(top), top.end)) {
         if (m.type === 'iprp') {
@@ -530,6 +564,7 @@ function inspectAvif(b: Uint8Array): HeaderInfo {
   if (bitDepthUncertain) metadata.bitDepthUncertain = true;
   if (hasTransformProperties) metadata.hasTransformProperties = true;
   if (colorDescription) metadata.colorDescription = colorDescription;
+  if (avifAnimation) metadata.animationInfo = avifAnimation;
   return { format: 'avif', width, height, metadata };
 }
 

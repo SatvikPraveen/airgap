@@ -6,6 +6,7 @@
  */
 import { createCanvasCodec } from './canvas';
 import { probeCodec } from './probe';
+import { inspect } from '../inspect';
 import { createTiffCodec } from './tiff';
 import { createQoiCodec } from './qoi';
 import type { CapabilityTable, Codec, DecodedImage, ImageFormat, ResolvedCodec } from './types';
@@ -142,9 +143,24 @@ export class CodecRegistry {
   /** Decode with the preferred codec, falling back to the next one on a per-file failure. */
   async decode(format: ImageFormat, bytes: Uint8Array): Promise<{ image: DecodedImage; used: Loaded }> {
     const errors: string[] = [];
+    // Preference order, except that for a file deeper than 8 bits an exact decoder that
+    // demonstrated that depth goes first (e.g. jxl-oxide renders to 8-bit in Firefox, where
+    // libjxl's own decoder keeps 16).
+    let depth = 8;
+    try {
+      const h = inspect(bytes);
+      if (!h.metadata.bitDepthUncertain) depth = h.metadata.bitDepth;
+    } catch {
+      /* the decoders report the real problem */
+    }
+    const candidates: Loaded[] = [];
     for (let i = 0; i < LOADERS[format].length; i++) {
       const l = await this.loadOne(format, i);
-      if (!l || !l.codec || !l.resolved.capabilities.decode) continue;
+      if (l && l.codec && l.resolved.capabilities.decode) candidates.push(l);
+    }
+    const keepsDepth = (l: Loaded) => l.resolved.capabilities.decodeExact && l.resolved.capabilities.decodeBitDepth >= depth;
+    if (depth > 8) candidates.sort((a, b) => Number(keepsDepth(b)) - Number(keepsDepth(a)));
+    for (const l of candidates) {
       try {
         const image = await l.codec.decode(bytes);
         return { image, used: l };

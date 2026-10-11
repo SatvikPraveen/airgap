@@ -19,8 +19,8 @@ const BUDGET = {
   jpeg: 8 * KB,
   webp: 320 * KB,
   tiff: 48 * KB, // utif + the tiff codec wrapper
-  jxl: 2100 * KB, // libjxl encoder + decoder (fallback) and jxl-oxide, the independent decoder that reads and verifies JXL
-  avif: 2300 * KB,
+  jxl: 2600 * KB, // Airgap's libjxl 0.12 build (encode, decode, JPEG recompression) and jxl-oxide, the independent decoder that reads and verifies JXL
+  avif: 2300 * KB, // Airgap's libavif 1.4.2 + libaom 3.15.2 build: stills and sequences, encode and decode
   meta: 8 * KB,
   other: 32 * KB,
 };
@@ -41,7 +41,9 @@ for (const f of readdirSync(join(dist, 'assets'))) {
   const gz = gzipSync(readFileSync(p), { level: 9 }).length;
   if (firstPaint.has('assets/' + f)) add('first-paint', f, gz);
   else {
-    const stem = (f.match(/^([a-z0-9]+)[-_.]/i)?.[1] ?? 'other').toLowerCase();
+    // Airgap's own builds (airgap_avif, airgap_jxl) belong to their format's group.
+    const own = f.match(/^airgap_([a-z0-9]+)/i)?.[1];
+    const stem = (own ?? f.match(/^([a-z0-9]+)[-_.]/i)?.[1] ?? 'other').toLowerCase();
     const g = ALIAS[stem] ?? stem;
     add(g in BUDGET ? g : 'other', f, gz);
   }

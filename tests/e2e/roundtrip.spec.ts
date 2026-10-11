@@ -4,6 +4,8 @@ import { decode as decodeTiff } from 'tiff';
 import {
   assertPixelIdentical,
   decodeApngNode,
+  decodeAvifNode,
+  jxlToJpegNode,
   decodeWebpAnimNode,
   decodeJxlNode,
   decodeQoiNode,
@@ -130,7 +132,7 @@ test('TIFF source: rgb16.tif -> PNG 16-bit exact', async ({ page }) => {
 test('JPEG XL lossless: rgba-partial.png -> JXL is exact over the full RGBA tuple, re-decoded in Node outside the browser', async ({ page }) => {
   await pickFixture(page, 'rgba-partial.png');
   await selectTarget(page, 'jxl-lossless');
-  await expect(page.getByTestId('target-note')).toContainText('encoder is exact and its paired decoder is at fault');
+  await expect(page.getByTestId('target-note')).toContainText('opaque pixels confirmed by jxl-oxide');
   await expect(page.getByTestId('loss-none')).toBeVisible();
   const { bytes, download } = await convertAndDownload(page);
   expect(download.suggestedFilename()).toBe('rgba-partial.jxl');
@@ -288,4 +290,40 @@ test('APNG -> animated WebP (lossless) keeps every frame and duration, read back
   const want = P.apngOpsExpectedFrames();
   got.frames.forEach((f, i) => expect(Array.from(f), `frame ${i}`).toEqual(Array.from(want[i]!)));
   expect(got.durations).toEqual([100, 70, 250, 0]);
+});
+
+test('JPEG -> JPEG XL by reversible recompression: the JPEG rebuilt in Node is the original file, byte for byte', async ({ page }) => {
+  await pickFixture(page, 'exif-gps.jpg');
+  await selectTarget(page, 'jxl-jpeg');
+  await page.getByTestId('meta-preserve').check();
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const { bytes, download } = await convertAndDownload(page);
+  expect(download.suggestedFilename()).toBe('exif-gps.jxl');
+  await expect(page.getByTestId('verification')).toContainText('byte-identical to the JPEG Airgap prepared');
+  expect(bytes.length).toBeLessThan(fixture('exif-gps.jpg').length);
+  const rebuilt = await jxlToJpegNode(bytes);
+  expect(rebuilt?.equals(fixture('exif-gps.jpg'))).toBe(true);
+});
+
+test('JPEG recompression is offered for JPEG sources only, and refuses transforms with a reason', async ({ page }) => {
+  await pickFixture(page, 'rgb8.png');
+  await expect(page.getByTestId('target').locator('option[value="jxl-jpeg"]')).toHaveText(/JPEG sources only/);
+  await pickFixture(page, 'exif-gps.jpg');
+  await selectTarget(page, 'jxl-jpeg');
+  await page.getByTestId('rotate-right').click();
+  await expect(page.getByTestId('transform-error')).toContainText('JPEG recompression keeps the JPEG exactly');
+  await expect(page.getByTestId('convert')).toBeDisabled();
+});
+
+test('APNG -> animated AVIF (lossless): zero delay declared as 1 ms; frames re-read in Node by libavif match the spec model', async ({ page }) => {
+  await pickFixture(page, 'apng-ops.png');
+  await selectTarget(page, 'avif-lossless');
+  await expect(page.locator('[data-loss="animation-timing"]')).toContainText('zero');
+  const { bytes } = await convertAndDownload(page);
+  await expect(page.getByTestId('verification')).toContainText('all 4 frames');
+  const got = await decodeAvifNode(bytes);
+  const want = P.apngOpsExpectedFrames();
+  got.frames.forEach((f, i) => expect(Array.from(f), `frame ${i}`).toEqual(Array.from(want[i]!)));
+  expect(got.durationsMs).toEqual([100, 70, 250, 1]);
+  expect(got.loops).toBe(3);
 });

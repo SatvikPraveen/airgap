@@ -17,8 +17,8 @@ terms.
 
 | Component | Used for | Licence | Text |
 | --- | --- | --- | --- |
-| [jSquash](https://github.com/jamsinclair/jSquash) `@jsquash/png`, `@jsquash/jpeg`, `@jsquash/webp`, `@jsquash/avif`, `@jsquash/jxl` by Jamie Sinclair, derived from [Squoosh](https://github.com/GoogleChromeLabs/squoosh) by Google LLC | packaging of the wasm codecs below and their loaders | Apache-2.0 | `licenses/Apache-2.0.txt` |
-| [Emscripten](https://emscripten.org/) runtime | JavaScript glue generated for the C/C++ codecs | MIT | `licenses/emscripten.txt` |
+| [jSquash](https://github.com/jamsinclair/jSquash) `@jsquash/png`, `@jsquash/jpeg`, `@jsquash/webp`, `@jsquash/oxipng` by Jamie Sinclair, derived from [Squoosh](https://github.com/GoogleChromeLabs/squoosh) by Google LLC | packaging of the wasm codecs below and their loaders | Apache-2.0 | `licenses/Apache-2.0.txt` |
+| [Emscripten](https://emscripten.org/) runtime | JavaScript glue generated for the C/C++ codecs (jSquash's, and Airgap's own libjxl/libavif builds) | MIT | `licenses/emscripten.txt` |
 | [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) runtime | JavaScript glue generated for the Rust PNG codec and for jxl-oxide | MIT or Apache-2.0 | `licenses/png-crate-and-wasm-bindgen.txt` |
 | `jxl-oxide-wasm` by Wonwoo Choi | packaging and bindings of jxl-oxide (below) | MIT or Apache-2.0 | `licenses/jxl-oxide-and-deps.txt` |
 | `@jsquash/oxipng` by Jamie Sinclair | packaging of oxipng (below), single-threaded build only | Apache-2.0 | `licenses/Apache-2.0.txt` |
@@ -29,9 +29,9 @@ terms.
 | --- | --- | --- | --- |
 | [mozjpeg](https://github.com/mozilla/mozjpeg) (a fork of libjpeg-turbo, which incorporates the Independent JPEG Group's libjpeg) | JPEG decode and encode | IJG licence, Modified BSD, zlib | `licenses/libjpeg-turbo.txt`, `licenses/mozjpeg.txt` |
 | [libwebp](https://chromium.googlesource.com/webm/libwebp) by Google Inc. | WebP decode and encode | BSD-3-Clause | `licenses/libwebp.txt` |
-| [libavif](https://github.com/AOMediaCodec/libavif) by Joe Drago and the AOMedia contributors | AVIF container decode and encode | BSD-2-Clause | `licenses/libavif-and-libaom.txt` |
-| [libaom](https://aomedia.googlesource.com/aom/) by the Alliance for Open Media | AV1 decode and encode inside AVIF | BSD-2-Clause and the Alliance for Open Media Patent License 1.0 | `licenses/libavif-and-libaom.txt` |
-| [libjxl](https://github.com/libjxl/libjxl) by the JPEG XL Project Authors | JPEG XL decode and encode | BSD-3-Clause | `licenses/libjxl-and-deps.txt` |
+| [libavif](https://github.com/AOMediaCodec/libavif) v1.4.2 by Joe Drago and the AOMedia contributors, built by Airgap (`tools/libavif`) | AVIF container decode and encode, stills and image sequences | BSD-2-Clause | `licenses/libavif-and-libaom.txt` |
+| [libaom](https://aomedia.googlesource.com/aom/) v3.15.2 by the Alliance for Open Media, built by Airgap | AV1 decode and encode inside AVIF | BSD-2-Clause and the Alliance for Open Media Patent License 1.0 | `licenses/libavif-and-libaom.txt` |
+| [libjxl](https://github.com/libjxl/libjxl) v0.12.0 by the JPEG XL Project Authors, built by Airgap (`tools/libjxl`) | JPEG XL encode, fallback decode, reversible JPEG recompression | BSD-3-Clause and the libjxl patent grant | `licenses/libjxl-and-deps.txt` |
 | [skcms](https://skia.googlesource.com/skcms/) by Google Inc. | colour management inside libjxl | BSD-3-Clause | `licenses/libjxl-and-deps.txt` |
 | [Highway](https://github.com/google/highway) by Google LLC | SIMD abstraction inside libjxl | Apache-2.0 | `licenses/libjxl-and-deps.txt`, `licenses/Apache-2.0.txt` |
 | [Brotli](https://github.com/google/brotli) by the Brotli Authors | entropy coding inside libjxl | MIT | `licenses/libjxl-and-deps.txt` |

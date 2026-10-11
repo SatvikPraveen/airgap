@@ -26,7 +26,7 @@ test('unprobed targets are selectable and get verified on selection', async ({ p
   await expect(opt).toHaveText(/select to verify/);
   await selectTarget(page, 'avif-lossless');
   await expect(opt).toHaveText('AVIF (lossless)');
-  await expect(page.getByTestId('target-note')).toContainText('wasm-avif');
+  await expect(page.getByTestId('target-note')).toContainText('libavif');
 });
 
 test('lossless-only disables lossy targets and moves the selection off them', async ({ page }) => {

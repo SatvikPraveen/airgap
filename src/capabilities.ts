@@ -24,6 +24,11 @@ export interface TargetSpec {
   lossless: boolean;
   metadataMode: MetadataMode;
   iccMode: IccMode;
+  /**
+   * JPEG source to JPEG XL by lossless recompression of the JPEG's coefficients: the JPEG XL
+   * rebuilds the (metadata-adjusted) JPEG byte for byte. No pixel is re-encoded.
+   */
+  jpegRecompression?: boolean;
 }
 
 export const DEFAULT_MODES: Pick<TargetSpec, 'metadataMode' | 'iccMode'> = {
@@ -97,6 +102,7 @@ export function plannedBitDepth(sourceDepth: number, p: Pipeline): number {
  * An empty list means: pixel-identical output AND no metadata dropped or altered.
  */
 export function computeLosses(source: SourceDescription, target: TargetSpec, p: Pipeline, geometry?: Geometry): Loss[] {
+  if (target.jpegRecompression) return recompressionLosses(source, target);
   const m = source.metadata;
   const enc = p.encoder;
   const dec = p.decoder;
@@ -199,6 +205,14 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
       kind: 'animation-timing',
       severity: 'metadata',
       message: 'Some frame delays are not whole milliseconds (APNG stores them as fractions such as 1/30 s). WebP stores whole milliseconds, so those delays are rounded to the nearest millisecond. Every frame is kept.',
+    });
+  }
+
+  if (m.isAnimated && dec.animation && enc.animation && target.format === 'avif' && m.animationInfo?.hasZeroDelay) {
+    losses.push({
+      kind: 'animation-timing',
+      severity: 'metadata',
+      message: 'Some frames have a delay of zero. AVIF cannot store a zero frame duration, so those frames get 1 ms. Every frame is kept.',
     });
   }
 
@@ -363,6 +377,34 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
     }
   }
 
+  return losses;
+}
+
+/**
+ * JPEG recompression keeps every DCT coefficient and every marker the prepared JPEG has, so no
+ * pixel value changes and the EXIF orientation tag stays (nothing is rotated). Only what the
+ * metadata modes remove from the JPEG before recompression is lost.
+ */
+function recompressionLosses(source: SourceDescription, target: TargetSpec): Loss[] {
+  const m = source.metadata;
+  const losses: Loss[] = [];
+  if (m.hasIcc && target.iccMode === 'convert-srgb') {
+    losses.push({ kind: 'icc-convert-unavailable', severity: 'pixels', message: 'Conversion to sRGB is not available with JPEG recompression: it would change pixel values, and recompression keeps the JPEG exactly. Choose "preserve" or "strip".' });
+  }
+  if (m.hasExif) {
+    if (target.metadataMode === 'strip-all') losses.push({ kind: 'exif', severity: 'metadata', message: m.hasGps ? 'EXIF metadata will be removed, including the embedded GPS location.' : 'EXIF metadata (camera, date, orientation tag, etc.) will be removed. Without the orientation tag, viewers show the image as stored.' });
+    else if (target.metadataMode === 'strip-gps') {
+      if (m.hasGps) losses.push({ kind: 'gps', severity: 'metadata', message: 'The GPS location will be removed from EXIF. Every other EXIF tag, the orientation tag included, is kept.' });
+      if (m.hasMakerNote) losses.push({ kind: 'makernote', severity: 'metadata', message: 'The MakerNote block will be removed whole. It is an opaque vendor blob that can carry location data and cannot be cleaned selectively.' });
+      if (m.thumbnailHasMetadata) losses.push({ kind: 'thumbnail-metadata', severity: 'metadata', message: 'The embedded thumbnail carries its own EXIF/XMP/ICC segments; those are removed (the thumbnail image itself is kept).' });
+    }
+  }
+  if (m.hasXmp && target.metadataMode !== 'preserve') {
+    losses.push({ kind: 'xmp', severity: 'metadata', message: target.metadataMode === 'strip-gps' ? 'XMP metadata will be removed: it can carry location data too, and Airgap does not edit XMP selectively.' : 'XMP metadata will be removed.' });
+  }
+  if (m.hasIcc && target.iccMode === 'strip') {
+    losses.push({ kind: 'icc', severity: 'metadata', message: 'The embedded ICC colour profile will be removed. Pixel values are unchanged; colours may render wrong if the profile was not sRGB. Values preserved, appearance not.' });
+  }
   return losses;
 }
 
