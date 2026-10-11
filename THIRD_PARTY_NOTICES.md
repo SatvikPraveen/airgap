@@ -1,6 +1,6 @@
 # Third-party notices
 
-Airgap is released under the MIT licence (see `LICENSE`). The image codecs it
+Airgap is released under the Apache License 2.0 (see `LICENSE` and `NOTICE`). The image codecs it
 bundles into its own script chunks are separate works with their own licences.
 This file lists every one of them, what it does inside Airgap, and where the
 verbatim licence text lives. The same information is published with the app at
@@ -50,7 +50,7 @@ terms.
 The header inspector, the loss matrix, the EXIF/XMP/ICC container plumbing,
 the ICC matrix/TRC conversion, the baseline TIFF writer, the colour-type-
 minimising PNG writer, the runtime probes and the verification step are
-Airgap's own code under the MIT licence.
+Airgap's own code under the Apache License 2.0.
 
 ## Patents
 

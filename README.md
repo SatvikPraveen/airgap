@@ -561,7 +561,9 @@ Two GitHub Actions workflows:
 
 ## Licence
 
-Airgap is released under the [MIT licence](LICENSE). The codecs it bundles are
+Airgap is released under the [Apache License 2.0](LICENSE), with attribution
+in [NOTICE](NOTICE). Releases before 2026-10-11 were published under the MIT
+licence and remain available under it. The codecs it bundles are
 separate works under their own terms: Apache-2.0 (jSquash wrappers, Highway),
 BSD (mozjpeg/libjpeg-turbo, libwebp, libavif, libaom, libjxl, skcms), MIT
 (Brotli, UTIF.js, pako, Emscripten, the Rust `png` crate and wasm-bindgen)

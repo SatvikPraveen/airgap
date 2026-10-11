@@ -1,0 +1,11 @@
+Airgap
+Copyright 2026 Satvik Praveen
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+Versions up to and including commit d3cf05d (2026-10-11) were released
+under the MIT licence and remain available under it.
+
+This product bundles third-party software under its own licences; see
+THIRD_PARTY_NOTICES.md and the licenses/ directory.
+
+This software is based in part on the work of the Independent JPEG Group.
