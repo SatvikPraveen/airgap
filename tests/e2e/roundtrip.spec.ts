@@ -3,6 +3,7 @@ import { decode as decodeTiff } from 'tiff';
 import {
   assertPixelIdentical,
   decodeJxlNode,
+  decodeQoiNode,
   convertAndDownload,
   decodeInBrowser,
   decodePngNode,
@@ -193,4 +194,28 @@ test('exif-gps.jpg -> JPEG: re-encoding flagged lossy, mozjpeg output has no EXI
   expect(jpegHasExif(bytes)).toBe(false);
   await expect(page.getByTestId('verification')).toHaveAttribute('data-identical', 'false');
   await expect(page.getByTestId('result-format')).toContainText('wasm-jpeg');
+});
+
+test('QOI: rgba-partial.png -> QOI is exact over the full RGBA tuple, re-decoded by the reference decoder in Node', async ({ page }) => {
+  await pickFixture(page, 'rgba-partial.png');
+  await selectTarget(page, 'qoi');
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const { bytes, download } = await convertAndDownload(page);
+  expect(download.suggestedFilename()).toBe('rgba-partial.qoi');
+  expect(bytes.subarray(0, 4).toString('latin1')).toBe('qoif');
+  assertPixelIdentical(decodePngNode(fixture('rgba-partial.png')), await decodeQoiNode(bytes));
+  await expect(page.getByTestId('verification')).toHaveAttribute('data-identical', 'true');
+});
+
+test('QOI source (reference encoder) -> PNG is exact; EXIF from a JPEG into QOI is listed as removed', async ({ page }) => {
+  await pickFixture(page, 'rgba-partial.qoi');
+  await expect(page.locator('[data-fact="format"]')).toHaveText('QOI');
+  await selectTarget(page, 'png');
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const { bytes } = await convertAndDownload(page);
+  assertPixelIdentical(decodePngNode(fixture('rgba-partial.png')), decodePngNode(bytes));
+  await pickFixture(page, 'exif-gps.jpg');
+  await selectTarget(page, 'qoi');
+  await page.getByTestId('meta-preserve').check();
+  await expect(page.locator('[data-loss="exif"]')).toContainText('cannot embed');
 });

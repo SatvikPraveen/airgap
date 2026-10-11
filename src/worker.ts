@@ -7,7 +7,7 @@
 import { CodecRegistry } from './codecs/registry';
 import type { DecodedImage, ImageFormat } from './codecs/types';
 import { convert, prepareSource } from './convert';
-import { sniffFormat, UnsupportedFormatError } from './inspect';
+import { FORMAT_LIST, sniffFormat, UnsupportedFormatError } from './inspect';
 import { summarizeExif } from './metadata/exif';
 import { listExifTags } from './metadata/exif-list';
 import type { ConvertedPayload, FromWorker, SourceInfo, ToWorker } from './protocol';
@@ -46,7 +46,7 @@ async function ensure(format: ImageFormat, role: 'decode' | 'encode'): Promise<v
 async function load(id: number, buffer: ArrayBuffer): Promise<void> {
   const bytes = new Uint8Array(buffer);
   const format = sniffFormat(bytes);
-  if (!format) throw new UnsupportedFormatError('Unrecognised file. Airgap reads PNG, JPEG, WebP, AVIF, JPEG XL and TIFF.');
+  if (!format) throw new UnsupportedFormatError(`Unrecognised file. Airgap reads ${FORMAT_LIST}.`);
   const { image, used } = await registry.decode(format, bytes);
   const decoded = prepareSource(image);
   images.set(id, { decoded, format });

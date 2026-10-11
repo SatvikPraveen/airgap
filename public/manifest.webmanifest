@@ -23,7 +23,8 @@
         "image/webp": [".webp"],
         "image/avif": [".avif"],
         "image/jxl": [".jxl"],
-        "image/tiff": [".tif", ".tiff"]
+        "image/tiff": [".tif", ".tiff"],
+        "image/qoi": [".qoi"]
       }
     }
   ]

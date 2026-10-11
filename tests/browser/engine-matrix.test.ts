@@ -15,6 +15,7 @@ const EXPECTED: Record<typeof ENGINE | 'webkit-macos', Record<ImageFormat, { enc
     avif: { encoder: 'wasm-avif', lossless: true, decoderExact: true },
     jxl: { encoder: 'wasm-jxl', lossless: true, decoderExact: true },
     tiff: { encoder: 'utif-tiff', lossless: true, decoderExact: true },
+    qoi: { encoder: 'airgap-qoi', lossless: true, decoderExact: true },
   },
   firefox: {
     png: { encoder: 'airgap-png', lossless: true, decoderExact: true },
@@ -23,6 +24,7 @@ const EXPECTED: Record<typeof ENGINE | 'webkit-macos', Record<ImageFormat, { enc
     avif: { encoder: 'wasm-avif', lossless: true, decoderExact: true },
     jxl: { encoder: 'wasm-jxl', lossless: true, decoderExact: true },
     tiff: { encoder: 'utif-tiff', lossless: true, decoderExact: true },
+    qoi: { encoder: 'airgap-qoi', lossless: true, decoderExact: true },
   },
   webkit: {
     png: { encoder: 'airgap-png', lossless: true, decoderExact: true },
@@ -31,6 +33,7 @@ const EXPECTED: Record<typeof ENGINE | 'webkit-macos', Record<ImageFormat, { enc
     avif: { encoder: 'wasm-avif', lossless: true, decoderExact: true },
     jxl: { encoder: 'wasm-jxl', lossless: true, decoderExact: true },
     tiff: { encoder: 'utif-tiff', lossless: true, decoderExact: true },
+    qoi: { encoder: 'airgap-qoi', lossless: true, decoderExact: true },
   },
   'webkit-macos': {
     png: { encoder: 'airgap-png', lossless: true, decoderExact: true },
@@ -41,6 +44,7 @@ const EXPECTED: Record<typeof ENGINE | 'webkit-macos', Record<ImageFormat, { enc
     avif: { encoder: 'wasm-avif', lossless: true, decoderExact: true },
     jxl: { encoder: 'wasm-jxl', lossless: true, decoderExact: true },
     tiff: { encoder: 'utif-tiff', lossless: true, decoderExact: true },
+    qoi: { encoder: 'airgap-qoi', lossless: true, decoderExact: true },
   },
 };
 
@@ -48,7 +52,7 @@ const KEY = IMAGEIO ? 'webkit-macos' : ENGINE;
 
 describe(`probe outcomes in ${KEY}`, () => {
   const registry = new CodecRegistry();
-  for (const format of ['png', 'jpeg', 'webp', 'avif', 'jxl', 'tiff'] as ImageFormat[]) {
+  for (const format of ['png', 'jpeg', 'webp', 'avif', 'jxl', 'tiff', 'qoi'] as ImageFormat[]) {
     it(format, async () => {
       const enc = await registry.resolve(format, 'encode');
       const dec = await registry.resolve(format, 'decode');

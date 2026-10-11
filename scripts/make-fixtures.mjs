@@ -25,6 +25,7 @@
  *   rgba-partial.avif   64x48  lossless AVIF with alpha
  *   rgba-partial.jxl    64x48  lossless JPEG XL with alpha
  *   exif-gps.jxl        64x48  the same codestream in a JXL container with Exif (GPS) and xml boxes
+ *   rgba-partial.qoi    64x48  QOI with alpha, written by the reference encoder (qoi.h via @jsquash/qoi)
  */
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -620,6 +621,21 @@ try {
   write('exif-gps.jxl', cat(sig, ftyp, exif, xmp, box('jxlc', new Uint8Array(bytes))));
 } catch (err) {
   console.warn('JXL fixture skipped:', err.message);
+}
+
+try {
+  globalThis.ImageData ??= class {
+    constructor(data, width, height) {
+      Object.assign(this, { data, width, height });
+    }
+  };
+  const { default: factory } = await import('@jsquash/qoi/codec/enc/qoi_enc.js');
+  const enc = await emscripten(factory, '@jsquash/qoi/codec/enc/qoi_enc.wasm');
+  const noise = P.lcg(2);
+  const rgba = raster8(P.RGBA_PARTIAL, (x, y) => P.rgbaPixel(x, y, noise));
+  write('rgba-partial.qoi', enc.encode(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.length), P.RGBA_PARTIAL.width, P.RGBA_PARTIAL.height));
+} catch (err) {
+  console.warn('QOI fixture skipped:', err.message);
 }
 
 console.log('fixtures written to', out);

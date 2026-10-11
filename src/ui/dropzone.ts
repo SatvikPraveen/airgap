@@ -24,7 +24,7 @@ export function createDropzone(onFiles: (files: File[]) => void): HTMLElement {
   const input = h('input', {
     type: 'file',
     multiple: true,
-    accept: 'image/png,image/jpeg,image/webp,image/avif,image/jxl,image/tiff,.png,.jpg,.jpeg,.webp,.avif,.jxl,.tif,.tiff',
+    accept: 'image/png,image/jpeg,image/webp,image/avif,image/jxl,image/tiff,image/qoi,.png,.jpg,.jpeg,.webp,.avif,.jxl,.tif,.tiff,.qoi',
     'data-testid': 'file-input',
     onChange: () => {
       const files = Array.from(input.files ?? []);
@@ -66,7 +66,7 @@ export function createDropzone(onFiles: (files: File[]) => void): HTMLElement {
         if (files.length) onFiles(files);
       },
     },
-    h('div', { class: 'big' }, 'Drop PNG, JPEG, WebP, AVIF, JPEG XL or TIFF files here'),
+    h('div', { class: 'big' }, 'Drop PNG, JPEG, WebP, AVIF, JPEG XL, TIFF or QOI files here'),
     h('div', {}, 'or click to choose files, or paste from the clipboard. Several files convert with the same settings into one ZIP archive.'),
     input,
   );

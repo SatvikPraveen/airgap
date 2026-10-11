@@ -9,7 +9,7 @@ export const FIXTURES = join(here, '..', 'fixtures');
 export const DIST = join(here, '..', '..', 'dist');
 export const fixture = (name: string): Buffer => readFileSync(join(FIXTURES, name));
 
-const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', avif: 'image/avif', jxl: 'image/jxl', tif: 'image/tiff', tiff: 'image/tiff' };
+const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', avif: 'image/avif', jxl: 'image/jxl', tif: 'image/tiff', tiff: 'image/tiff', qoi: 'image/qoi' };
 export const mimeOf = (name: string): string => MIME[name.split('.').pop()!] ?? 'application/octet-stream';
 
 /** Page loaded, worker booted and answered, network quiet. */
@@ -97,6 +97,29 @@ export async function decodeJxlNode(bytes: Buffer): Promise<Raster> {
   const png = Buffer.from(img.render().encodeToPng());
   img.free();
   return decodePngNode(png);
+}
+
+/** Decode QOI in Node with the reference implementation (qoi.h via @jsquash/qoi), sharing no code with the app's codec. */
+export async function decodeQoiNode(bytes: Buffer): Promise<Raster> {
+  (globalThis as unknown as { ImageData: unknown }).ImageData ??= class {
+    constructor(
+      public data: Uint8ClampedArray,
+      public width: number,
+      public height: number,
+    ) {}
+  };
+  const factory = ((await import('@jsquash/qoi/codec/dec/qoi_dec.js')) as unknown as { default: (o: object) => Promise<{ decode(b: Uint8Array): { data: Uint8ClampedArray; width: number; height: number } }> }).default;
+  const wasm = readFileSync(fileURLToPath(import.meta.resolve('@jsquash/qoi/codec/dec/qoi_dec.wasm')));
+  const mod = await factory({
+    noInitialRun: true,
+    instantiateWasm(imports: WebAssembly.Imports, cb: (i: WebAssembly.Instance) => void) {
+      const inst = new WebAssembly.Instance(new WebAssembly.Module(wasm), imports);
+      cb(inst);
+      return inst.exports;
+    },
+  });
+  const img = mod.decode(new Uint8Array(bytes));
+  return { width: img.width, height: img.height, data: new Uint8Array(img.data) };
 }
 
 /** Decode arbitrary image bytes with the browser's own decoder (WebP/AVIF/JPEG output). */

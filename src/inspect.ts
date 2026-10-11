@@ -7,6 +7,7 @@
  * BEFORE pixels are decoded.
  */
 import type { ColorDescription, ImageFormat, ImageMetadata } from './codecs/types';
+import { isQoi, readQoiHeader } from './codecs/qoi';
 import { findEntry, parseTiffStructure, readNumber, readNumbers, TAG } from './metadata/tiff-ifd';
 
 export type HeaderMetadata = Omit<ImageMetadata, 'hasTransparency' | 'hasSemiTransparency' | 'exif' | 'icc' | 'xmp' | 'iccKind' | 'iccDescription' | 'iccConvertible'>;
@@ -22,7 +23,8 @@ export class UnsupportedFormatError extends Error {
   override name = 'UnsupportedFormatError';
 }
 
-const UNSUPPORTED = 'Unrecognised file. Airgap reads PNG, JPEG, WebP, AVIF, JPEG XL and TIFF.';
+export const FORMAT_LIST = 'PNG, JPEG, WebP, AVIF, JPEG XL, TIFF and QOI';
+const UNSUPPORTED = `Unrecognised file. Airgap reads ${FORMAT_LIST}.`;
 
 export function inspect(bytes: Uint8Array): HeaderInfo {
   const format = sniffFormat(bytes);
@@ -39,6 +41,8 @@ export function inspect(bytes: Uint8Array): HeaderInfo {
       return inspectJxl(bytes);
     case 'tiff':
       return inspectTiff(bytes);
+    case 'qoi':
+      return inspectQoi(bytes);
     default:
       throw new UnsupportedFormatError(UNSUPPORTED);
   }
@@ -51,7 +55,17 @@ export function sniffFormat(bytes: Uint8Array): ImageFormat | null {
   if (isJxl(bytes)) return 'jxl';
   if (isAvif(bytes)) return 'avif';
   if (isTiff(bytes)) return 'tiff';
+  if (isQoi(bytes)) return 'qoi';
   return null;
+}
+
+function inspectQoi(b: Uint8Array): HeaderInfo {
+  const h = readQoiHeader(b);
+  const metadata = baseMeta({ bitDepth: 8, hasAlpha: h.channels === 4 });
+  metadata.sourceLossless = true;
+  metadata.colorLayout = `${h.channels === 4 ? 'RGBA' : 'RGB'}, 8-bit${h.colorspace === 1 ? ', linear' : ''}`;
+  if (h.colorspace === 1) metadata.colorDescription = { primaries: 1, transfer: 8 };
+  return { format: 'qoi', width: h.width, height: h.height, metadata };
 }
 
 // ---------------------------------------------------------------- helpers

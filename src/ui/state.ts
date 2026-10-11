@@ -30,6 +30,7 @@ export type TargetKey =
   | 'jxl-lossless'
   | 'jxl-lossy'
   | 'tiff'
+  | 'qoi'
   | 'jpeg';
 
 export interface TargetDef {
@@ -47,10 +48,11 @@ export const TARGETS: Record<TargetKey, TargetDef> = {
   'jxl-lossless': { format: 'jxl', lossless: true, label: 'JPEG XL (lossless)' },
   'jxl-lossy': { format: 'jxl', lossless: false, label: 'JPEG XL (lossy)' },
   tiff: { format: 'tiff', lossless: true, label: 'TIFF (lossless, uncompressed)' },
+  qoi: { format: 'qoi', lossless: true, label: 'QOI (lossless, 8-bit, no metadata)' },
   jpeg: { format: 'jpeg', lossless: false, label: 'JPEG (lossy)' },
 };
 
-export const TARGET_ORDER: TargetKey[] = ['png', 'webp-lossless', 'webp-lossy', 'avif-lossless', 'avif-lossy', 'jxl-lossless', 'jxl-lossy', 'tiff', 'jpeg'];
+export const TARGET_ORDER: TargetKey[] = ['png', 'webp-lossless', 'webp-lossy', 'avif-lossless', 'avif-lossy', 'jxl-lossless', 'jxl-lossy', 'tiff', 'qoi', 'jpeg'];
 
 export interface LoadedSource {
   id: number;

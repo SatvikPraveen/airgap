@@ -7,6 +7,7 @@
 import { createCanvasCodec } from './canvas';
 import { probeCodec } from './probe';
 import { createTiffCodec } from './tiff';
+import { createQoiCodec } from './qoi';
 import type { CapabilityTable, Codec, DecodedImage, ImageFormat, ResolvedCodec } from './types';
 
 type Loader = () => Promise<Codec>;
@@ -24,6 +25,7 @@ const LOADERS: Record<ImageFormat, Loader[]> = {
   avif: [() => import('./wasm/avif').then((m) => m.createWasmAvifCodec()), async () => createCanvasCodec('avif')],
   jxl: [() => import('./wasm/jxl-oxide').then((m) => m.createJxlOxideCodec()), () => import('./wasm/jxl').then((m) => m.createWasmJxlCodec())],
   tiff: [async () => createTiffCodec()],
+  qoi: [async () => createQoiCodec()],
 };
 
 /**

@@ -12,8 +12,8 @@ anything.)
 
 Live: **https://satvikpraveen.github.io/airgap/**
 
-Formats: PNG, JPEG, WebP, AVIF, JPEG XL and TIFF in; PNG, JPEG, WebP, AVIF,
-JPEG XL and TIFF out. HEIC is deliberately absent (see below).
+Formats: PNG, JPEG, WebP, AVIF, JPEG XL, TIFF and QOI in and out. HEIC is
+deliberately absent (see below).
 
 <p align="center">
   <img src="docs/screenshots/converted-light.png" alt="Airgap after converting a JPEG: the source facts, the metadata inspector, the loss list, the verification result and the heat map of changed pixels" width="720" />
@@ -137,6 +137,7 @@ under alpha 0, compared with a plain `===` after decoding the output again.
 | WebP lossless, AVIF lossless sources to any lossless target | **yes** | fixture decodes match the generating pattern exactly |
 | PNG 8-bit RGBA to JPEG XL lossless | **yes** | verified by jxl-oxide, which shares no code with the libjxl encoder; the downloaded file is re-decoded in Node too |
 | JPEG XL lossless sources (8-bit) to any lossless target | **yes** | jxl-oxide decodes the lossless fixture to the generating pattern exactly |
+| PNG 8-bit RGBA to QOI, QOI sources to any lossless target | **yes** | Airgap's QOI codec is byte-identical to the reference encoder; downloads re-decoded by the reference decoder in Node |
 | Anything through the canvas fallback with transparency | **no** | canvas is premultiplied: semi-transparent RGB rounds, RGB under alpha 0 is zeroed |
 | Any 16-bit source to WebP or JPEG XL | no, 8-bit output | flagged as `bit-depth` |
 | JPEG XL sources deeper than 8 bits | no, read as 8-bit | the decoder's depth above 8 bits is not demonstrated in the browser, so it is not claimed; flagged as `bit-depth` |
@@ -409,6 +410,20 @@ request for. Above 4 megapixels the preview does not run on every move (an
 AVIF encode of a large image takes seconds); a button runs it once for the
 current settings instead.
 
+## QOI
+
+[QOI](https://qoiformat.org/) is a small lossless format: 8-bit RGB or RGBA,
+straight alpha, no metadata. Airgap reads and writes it with its own codec
+(`src/codecs/qoi.ts`, written from the specification, pure TypeScript, no
+WebAssembly). The reference implementation (`qoi.h`, compiled in
+`@jsquash/qoi`) is a test-only dependency: on images that exercise every
+operation, including runs longer than 62, index hits, both difference ops and
+colour under alpha 0, Airgap's encoder output is byte-identical to the
+reference encoder's, and each decoder reads the other's files exactly. QOI
+cannot carry EXIF, ICC or XMP, and the loss list says so when you ask to
+preserve them. A file declaring QOI's "all channels linear" colourspace gets
+the same colour-description warning as any other non-sRGB source.
+
 ## Crop, rotate, mirror, resize
 
 The **Transform** fieldset edits geometry before encoding, in a fixed order:
@@ -510,6 +525,7 @@ next decoder is tried for that file and the source panel names the one used.
 | AVIF | @jsquash/avif (libavif + aom), 8/10/12-bit | canvas (decode only) |
 | JPEG XL | decode and verification: jxl-oxide (independent, from the specification); encode: @jsquash/jxl (libjxl snapshot), 8-bit | decode: libjxl, per file |
 | TIFF | utif (decode) + own baseline writer, 8/16-bit | none |
+| QOI | Airgap's own encoder and decoder, written from the specification, 8-bit | none |
 
 The TIFF writer is uncompressed baseline, little-endian, single strip, straight
 alpha declared as `ExtraSamples=2`, and is validated against two independent
@@ -570,6 +586,7 @@ src/codecs/canvas.ts       browser canvas fallback (exactAlpha: false)
 src/codecs/png-writer.ts   own PNG writer: minimal exact colour type, adaptive filters
 src/codecs/wasm/*.ts       @jsquash-backed PNG (decode), JPEG, WebP, AVIF, JPEG XL
 src/codecs/tiff.ts         utif decode + own baseline writer
+src/codecs/qoi.ts          own QOI encoder/decoder from the specification
 src/inspect.ts             pure header parsing for all six formats, incl. CICP colour descriptions
 src/capabilities.ts        pure: source + target + probed pipeline -> list of losses
 src/convert.ts             pure orchestration: ICC, bit depth, flatten, metadata, verification, diff mask

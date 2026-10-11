@@ -436,5 +436,7 @@ export function label(format: ImageFormat): string {
       return 'JPEG XL';
     case 'tiff':
       return 'TIFF';
+    case 'qoi':
+      return 'QOI';
   }
 }
