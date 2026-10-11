@@ -1,0 +1,28 @@
+name: Reproduce codec builds
+
+# Rebuilds vendor/libjxl and vendor/libavif from tools/ and fails if the bytes differ from the
+# committed ones. Manual and monthly: it takes a while and never gates a deployment.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 3 * *'
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        codec: [libjxl, libavif]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build ${{ matrix.codec }}
+        run: tools/${{ matrix.codec }}/build.sh
+      - name: Compare with the committed bytes
+        run: |
+          git status --porcelain vendor/
+          git diff --exit-code --stat vendor/
