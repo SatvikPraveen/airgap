@@ -19,7 +19,7 @@ const readme = read('README.md');
 const pkg = JSON.parse(read('package.json'));
 
 /** Libraries inside the wasm binaries (not visible to npm), plus the glue generators. */
-const BUNDLED_UPSTREAMS = ['mozjpeg', 'libjpeg-turbo', 'libwebp', 'libavif', 'libaom', 'libjxl', 'skcms', 'Highway', 'Brotli', 'Emscripten', 'wasm-bindgen', 'image-rs'];
+const BUNDLED_UPSTREAMS = ['mozjpeg', 'libjpeg-turbo', 'libwebp', 'libavif', 'libaom', 'libjxl', 'skcms', 'Highway', 'Brotli', 'Emscripten', 'wasm-bindgen', 'image-rs', 'jxl-oxide', 'brotli-decompressor', 'miniz_oxide', 'tracing-core'];
 const IJG = 'This software is based in part on the work of the Independent JPEG Group.';
 
 const problems = [];

@@ -12,6 +12,7 @@ import type { Codec, PixelData } from '../../src/codecs/types';
 import { createWasmAvifCodec } from '../../src/codecs/wasm/avif';
 import { createWasmJpegCodec } from '../../src/codecs/wasm/jpeg';
 import { createWasmJxlCodec } from '../../src/codecs/wasm/jxl';
+import { createJxlOxideCodec } from '../../src/codecs/wasm/jxl-oxide';
 import { createAirgapPngCodec, createWasmPngCodec } from '../../src/codecs/wasm/png';
 import { createWasmWebpCodec } from '../../src/codecs/wasm/webp';
 import { inspect } from '../../src/inspect';
@@ -26,6 +27,7 @@ const codecs: Record<string, Promise<Codec>> = {
   webp: createWasmWebpCodec(),
   avif: createWasmAvifCodec(),
   jxl: createWasmJxlCodec(),
+  'jxl-oxide': createJxlOxideCodec(),
   tiff: Promise.resolve(createTiffCodec()),
 };
 
@@ -46,6 +48,28 @@ describe('probes (the same ones the app runs)', () => {
     expect(r.capabilities.exactAlpha).toBe(false);
     expect(r.capabilities.decodeExact).toBe(false);
     expect(r.probe.detail).toMatch(/max diff 1\b/);
+  });
+  it('jxl + jxl-oxide: the independent decoder reads libjxl lossless output exactly, so the ENCODER is lossless and the paired decoder is at fault', async () => {
+    const r = await probeCodec(await codecs.jxl!, await codecs['jxl-oxide']!);
+    console.log('[probe jxl, jxl-oxide independent]', r.probe.detail, JSON.stringify(r.probe.checks));
+    expect(r.capabilities.lossless).toBe(true);
+    expect(r.capabilities.exactAlpha).toBe(true);
+    expect(r.capabilities.decodeExact).toBe(false);
+    expect(r.probe.checks['independentDecode']).toEqual({ claimed: true, verified: true });
+    expect(r.probe.detail).toMatch(/encoder is exact and its paired decoder is at fault/);
+  });
+  it('jxl-oxide (decode only): demonstrated exact against a lossless libjxl encoding, full RGBA; depth capped at 8', async () => {
+    const r = await probeCodec(await codecs['jxl-oxide']!, undefined, await codecs.jxl!);
+    console.log('[probe jxl-oxide]', r.probe.detail, JSON.stringify(r.probe.checks));
+    expect(r.capabilities.decodeExact).toBe(true);
+    expect(r.capabilities.exactAlpha).toBe(true);
+    expect(r.capabilities.decodeBitDepth).toBe(8);
+    expect(r.capabilities.encode).toBe(false);
+    expect(r.probe.detail).toMatch(/RGB under alpha 0 included/);
+  });
+  it('a decode-only codec without a reference encoder stays unverified', async () => {
+    const r = await probeCodec(await codecs['jxl-oxide']!);
+    expect(r.capabilities.decodeExact).toBe(false);
   });
   for (const name of ['png', 'png-rs', 'webp', 'avif', 'tiff'] as const) {
     it(`${name}: lossless and exactAlpha verified in this browser`, async () => {
@@ -148,6 +172,13 @@ describe('decoding the independently written fixtures', () => {
     expect(firstMismatch(b.pixels.data, rgba16().data)).toBeNull();
     const c = await png.decode(await fixtureBytes('rgb16.png'));
     expect(firstMismatch(c.pixels.data, rasterFrom(P.RGB16, (x, y) => P.rgb16Pixel(x, y), 16).data)).toBeNull();
+  });
+  it('jxl-oxide decodes the lossless JXL fixture to the exact pattern, alpha-0 colour included (libjxl: within 1)', async () => {
+    const img = await (await codecs['jxl-oxide']!).decode(await fixtureBytes('rgba-partial.jxl'));
+    expect(img.pixels.bitDepth).toBe(8);
+    expect(firstMismatch(img.pixels.data, rgba8().data)).toBeNull();
+    expect(img.metadata.hasAlpha).toBe(true);
+    expect(img.metadata.orientationApplied).toBe(true);
   });
   it('webp/avif: the lossless fixtures decode to the exact pattern; jxl is within 1', async () => {
     for (const [name, file] of [['webp', 'rgba-partial.webp'], ['avif', 'rgba-partial.avif']] as const) {

@@ -31,13 +31,14 @@ test('unprobed targets are selectable and get verified on selection', async ({ p
 
 test('lossless-only disables lossy targets and moves the selection off them', async ({ page }) => {
   await pickFixture(page, 'rgb8.png');
-  await selectTarget(page, 'jxl-lossless'); // probes JXL: its lossless claim fails in Chromium
+  await selectTarget(page, 'jxl-lossless'); // probes JXL: lossless verified through jxl-oxide
   await selectTarget(page, 'jpeg');
   await page.getByTestId('lossless-only').check();
   const target = page.getByTestId('target');
   await expect(target.locator('option[value="jpeg"]')).toBeDisabled();
   await expect(target.locator('option[value="webp-lossy"]')).toBeDisabled();
-  await expect(target.locator('option[value="jxl-lossless"]')).toBeDisabled();
+  await expect(target.locator('option[value="jxl-lossy"]')).toBeDisabled();
+  await expect(target.locator('option[value="jxl-lossless"]')).toBeEnabled();
   await expect(target.locator('option[value="png"]')).toBeEnabled();
   await expect(target).toHaveValue('png');
   await expect(page.getByTestId('convert')).toBeEnabled();

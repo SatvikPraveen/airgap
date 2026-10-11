@@ -45,7 +45,10 @@ describe('registry resolution', () => {
   it('prefers the wasm codec for every format and keeps canvas as the fallback for png/jpeg/webp', async () => {
     expect((await registry.resolve('png', 'decode')).resolved.codecId).toBe('airgap-png');
     expect((await registry.resolve('png', 'encode')).resolved.codecId).toBe('airgap-png');
-    for (const f of ['jpeg', 'webp', 'avif', 'jxl'] as const) expect((await registry.resolve(f, 'decode')).resolved.codecId).toBe(`wasm-${f}`);
+    for (const f of ['jpeg', 'webp', 'avif'] as const) expect((await registry.resolve(f, 'decode')).resolved.codecId).toBe(`wasm-${f}`);
+    // JPEG XL: jxl-oxide reads and verifies, libjxl encodes.
+    expect((await registry.resolve('jxl', 'decode')).resolved.codecId).toBe('jxl-oxide');
+    expect((await registry.resolve('jxl', 'encode')).resolved.codecId).toBe('wasm-jxl');
     expect((await registry.resolve('tiff', 'encode')).resolved.codecId).toBe('utif-tiff');
     const table = registry.table();
     expect(table.png?.decode?.capabilities.exactAlpha).toBe(true);
@@ -162,11 +165,14 @@ describe('alpha through the whole pipeline', () => {
       expect(r.result.verification.differingPixels, format).toBe(0);
     }
   });
-  it('rgba-partial.png -> JPEG XL "lossless" is measured as not identical and the registry says lossless is unverified', async () => {
+  it('rgba-partial.png -> JPEG XL lossless is verified identical by jxl-oxide, full RGBA, alpha-0 colour included', async () => {
     const r = await run('rgba-partial.png', { format: 'jxl' });
-    expect(registry.table().jxl?.encode?.capabilities.lossless).toBe(false);
-    expect(r.result.verification.identical).toBe(false);
-    expect(r.result.verification.maxChannelDiff).toBe(1);
+    const enc = registry.table().jxl?.encode?.capabilities;
+    expect(enc?.lossless).toBe(true);
+    expect(enc?.exactAlpha).toBe(true);
+    expect(enc?.decodeExact).toBe(false); // libjxl's own decoder is the inexact side, and it is not used to read
+    expect(r.result.verification.verifierId).toBe('jxl-oxide');
+    expect(r.result.verification.identical).toBe(true);
   });
   it('rgba16.png -> PNG and TIFF stay 16-bit and identical; -> WebP is reduced to 8-bit and says so', async () => {
     for (const format of ['png', 'tiff'] as const) {

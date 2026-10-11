@@ -1,0 +1,70 @@
+jxl-oxide and the Rust crates compiled into its WebAssembly build
+=================================================================
+
+Airgap decodes JPEG XL with the jxl-oxide-wasm package (jxl-oxide 0.12.6),
+a JPEG XL decoder written in Rust from the specification by Wonwoo Choi and
+the jxl-oxide contributors. Its WebAssembly binary also contains these
+crates, each with the licence shown:
+
+  jxl-oxide workspace (jxl-oxide, jxl-render, jxl-frame, jxl-modular,
+    jxl-vardct, jxl-color, jxl-bitstream, jxl-coding, jxl-grid, jxl-jbr,
+    jxl-image, jxl-oxide-wasm)          MIT or Apache-2.0
+  png 0.18.1 (image-rs contributors)    MIT or Apache-2.0
+  fdeflate 0.3.7 (The image-rs Developers) MIT or Apache-2.0
+  flate2 1.1.9 (Alex Crichton)          MIT or Apache-2.0
+  miniz_oxide 0.8.9 (Frommi, oyvindln)  MIT or Zlib or Apache-2.0
+  once_cell 1.21.4 (Aleksey Kladov)     MIT or Apache-2.0
+  tracing-core 0.1.36 (Tokio Contributors) MIT
+  brotli-decompressor 5.0.0 (Dropbox)   BSD-3-Clause or MIT
+  wasm-bindgen 0.2.122                  MIT or Apache-2.0
+
+Where a crate offers a choice, Airgap redistributes it under the MIT licence,
+reproduced below with every copyright line the crates carry. The Apache
+alternative is in licenses/Apache-2.0.txt. brotli-decompressor is reproduced
+under its BSD-3-Clause licence, after the MIT text.
+
+---------------------------------------------------------------------- MIT
+
+Copyright (c) Wonwoo Choi and the jxl-oxide contributors (jxl-oxide)
+Copyright (c) 2015 nwin and the image-rs contributors (png)
+Copyright (c) The image-rs Developers (fdeflate)
+Copyright (c) 2014-2026 Alex Crichton (flate2)
+Copyright 2013-2014 RAD Game Tools and Valve Software (miniz_oxide)
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC (miniz_oxide)
+Copyright (c) 2017 Frommi (miniz_oxide)
+Copyright (c) 2017-2024 oyvindln (miniz_oxide)
+Copyright (c) Aleksey Kladov (once_cell)
+Copyright (c) 2019 Tokio Contributors (tracing-core)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------- BSD-3-Clause (brotli-decompressor)
+
+Copyright (c) 2016 Dropbox, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

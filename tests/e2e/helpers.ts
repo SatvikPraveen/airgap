@@ -86,6 +86,19 @@ export function decodePngNode(bytes: Buffer): Raster {
   return { width: png.width, height: png.height, data: new Uint8Array(png.data) };
 }
 
+/** Decode JPEG XL in Node with jxl-oxide (no browser involved), via its PNG rendering and pngjs. */
+export async function decodeJxlNode(bytes: Buffer): Promise<Raster> {
+  const glue = await import('jxl-oxide-wasm');
+  const wasmPath = fileURLToPath(import.meta.resolve('jxl-oxide-wasm/module.wasm'));
+  glue.initSync({ module: readFileSync(wasmPath) });
+  const img = new glue.JxlImage();
+  img.feedBytes(new Uint8Array(bytes));
+  if (!img.tryInit()) throw new Error('jxl-oxide: incomplete header');
+  const png = Buffer.from(img.render().encodeToPng());
+  img.free();
+  return decodePngNode(png);
+}
+
 /** Decode arbitrary image bytes with the browser's own decoder (WebP/AVIF/JPEG output). */
 export async function decodeInBrowser(page: Page, bytes: Buffer, mime: string): Promise<Raster> {
   const r = await page.evaluate(

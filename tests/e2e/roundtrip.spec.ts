@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { decode as decodeTiff } from 'tiff';
 import {
   assertPixelIdentical,
+  decodeJxlNode,
   convertAndDownload,
   decodeInBrowser,
   decodePngNode,
@@ -122,12 +123,31 @@ test('TIFF source: rgb16.tif -> PNG 16-bit exact', async ({ page }) => {
   assertPixelIdentical(decodePngNode(fixture('rgb16.png')), decodePngNode(bytes));
 });
 
-test('JPEG XL: the lossless option is disabled (probe not exact); lossy JXL still converts', async ({ page }) => {
+test('JPEG XL lossless: rgba-partial.png -> JXL is exact over the full RGBA tuple, re-decoded in Node outside the browser', async ({ page }) => {
+  await pickFixture(page, 'rgba-partial.png');
+  await selectTarget(page, 'jxl-lossless');
+  await expect(page.getByTestId('target-note')).toContainText('encoder is exact and its paired decoder is at fault');
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const { bytes, download } = await convertAndDownload(page);
+  expect(download.suggestedFilename()).toBe('rgba-partial.jxl');
+  await expect(page.getByTestId('verification')).toHaveAttribute('data-identical', 'true');
+  await expect(page.getByTestId('verification')).toContainText('(jxl-oxide)');
+  assertPixelIdentical(decodePngNode(fixture('rgba-partial.png')), await decodeJxlNode(bytes));
+});
+
+test('JPEG XL source: rgba-partial.jxl -> PNG reads exactly through jxl-oxide; no decoder-unverified loss', async ({ page }) => {
+  await pickFixture(page, 'rgba-partial.jxl');
+  await expect(page.locator('[data-fact="decoder"]')).toContainText('jxl-oxide');
+  await selectTarget(page, 'png');
+  await expect(page.locator('[data-loss="decoder-unverified"]')).toHaveCount(0);
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const { bytes } = await convertAndDownload(page);
+  assertPixelIdentical(decodePngNode(fixture('rgba-partial.png')), decodePngNode(bytes));
+});
+
+test('JPEG XL lossy still converts and is reported lossy', async ({ page }) => {
   await pickFixture(page, 'rgb8.png');
   await selectTarget(page, 'jxl-lossy');
-  const losslessOpt = page.getByTestId('target').locator('option[value="jxl-lossless"]');
-  await expect(losslessOpt).toBeDisabled();
-  await expect(losslessOpt).toHaveText(/lossless not verified/);
   await expect(page.locator('[data-loss="pixels-lossy"]')).toBeVisible();
   const { bytes, download } = await convertAndDownload(page);
   expect(download.suggestedFilename()).toBe('rgb8.jxl');

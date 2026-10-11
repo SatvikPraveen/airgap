@@ -19,7 +19,8 @@ terms.
 | --- | --- | --- | --- |
 | [jSquash](https://github.com/jamsinclair/jSquash) `@jsquash/png`, `@jsquash/jpeg`, `@jsquash/webp`, `@jsquash/avif`, `@jsquash/jxl` by Jamie Sinclair, derived from [Squoosh](https://github.com/GoogleChromeLabs/squoosh) by Google LLC | packaging of the wasm codecs below and their loaders | Apache-2.0 | `licenses/Apache-2.0.txt` |
 | [Emscripten](https://emscripten.org/) runtime | JavaScript glue generated for the C/C++ codecs | MIT | `licenses/emscripten.txt` |
-| [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) runtime | JavaScript glue generated for the Rust PNG codec | MIT or Apache-2.0 | `licenses/png-crate-and-wasm-bindgen.txt` |
+| [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) runtime | JavaScript glue generated for the Rust PNG codec and for jxl-oxide | MIT or Apache-2.0 | `licenses/png-crate-and-wasm-bindgen.txt` |
+| `jxl-oxide-wasm` by Wonwoo Choi | packaging and bindings of jxl-oxide (below) | MIT or Apache-2.0 | `licenses/jxl-oxide-and-deps.txt` |
 
 ## Codecs compiled to WebAssembly
 
@@ -34,6 +35,8 @@ terms.
 | [Highway](https://github.com/google/highway) by Google LLC | SIMD abstraction inside libjxl | Apache-2.0 | `licenses/libjxl-and-deps.txt`, `licenses/Apache-2.0.txt` |
 | [Brotli](https://github.com/google/brotli) by the Brotli Authors | entropy coding inside libjxl | MIT | `licenses/libjxl-and-deps.txt` |
 | Rust [`png`](https://github.com/image-rs/image-png) crate and dependencies by the image-rs contributors | PNG decode (8 and 16-bit) | MIT or Apache-2.0 | `licenses/png-crate-and-wasm-bindgen.txt` |
+| [jxl-oxide](https://github.com/tirr-c/jxl-oxide) by Wonwoo Choi and contributors, a JPEG XL decoder written from the specification, with the `png`, `fdeflate`, `flate2`, `miniz_oxide`, `once_cell` and `tracing-core` crates | JPEG XL decode, and verification of JPEG XL output (shares no code with libjxl) | MIT or Apache-2.0 (`tracing-core`: MIT; `miniz_oxide`: also Zlib) | `licenses/jxl-oxide-and-deps.txt`, `licenses/Apache-2.0.txt` |
+| [brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) by Dropbox, Inc. | Brotli-compressed metadata boxes inside jxl-oxide | BSD-3-Clause or MIT | `licenses/jxl-oxide-and-deps.txt` |
 
 ## Pure JavaScript libraries
 

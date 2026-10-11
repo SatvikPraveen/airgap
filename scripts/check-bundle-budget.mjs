@@ -19,7 +19,7 @@ const BUDGET = {
   jpeg: 8 * KB,
   webp: 320 * KB,
   tiff: 48 * KB, // utif + the tiff codec wrapper
-  jxl: 1400 * KB,
+  jxl: 2100 * KB, // libjxl encoder + decoder (fallback) and jxl-oxide, the independent decoder that reads and verifies JXL
   avif: 2300 * KB,
   meta: 8 * KB,
   other: 32 * KB,
