@@ -18,6 +18,20 @@ test suites, which run in Chromium, Firefox and WebKit.
   composited exactly as libwebp's animation decoder does, including its
   integer blending, and checked against it sample for sample. A delay that
   WebP cannot hold in whole milliseconds is listed before conversion.
+- **Animated AVIF (image sequences)** in and out, with exact fractional
+  timing, through libavif 1.4.2 + libaom 3.15.2, now built by Airgap
+  (`tools/libavif`). It replaces the jSquash AVIF build and is smaller.
+- **libjxl 0.12.0, built by Airgap** (`tools/libjxl`), replaces the 2022
+  snapshot. Its decoder is exact, 16-bit JPEG XL is written and read, and ICC,
+  EXIF and XMP are carried.
+- **Reversible JPEG recompression:** JPEG to JPEG XL, verified by rebuilding
+  the JPEG byte for byte. Metadata modes still apply.
+- Codec builds are reproducible: pinned Dockerfiles, SHA256SUMS, and a
+  workflow that rebuilds and compares.
+
+### Fixed
+- Licence texts: libaom's patent licence, libjxl's patent grant and skcms's
+  licence are now included verbatim (they were missing).
 
 ## 0.2.0 (2026-10-11)
 

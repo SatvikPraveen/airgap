@@ -12,8 +12,10 @@ anything.)
 
 Live: **https://satvikpraveen.github.io/airgap/**
 
-Formats: PNG, JPEG, WebP, AVIF, JPEG XL, TIFF and QOI in and out. HEIC is
-deliberately absent (see below).
+Formats: PNG, JPEG, WebP, AVIF, JPEG XL, TIFF and QOI in and out, with
+animations (APNG, animated WebP, AVIF sequences) kept frame for frame, and
+JPEG to JPEG XL recompression that rebuilds the original JPEG byte for byte.
+HEIC is deliberately absent (see below).
 
 <p align="center">
   <img src="docs/screenshots/converted-light.png" alt="Airgap after converting a JPEG: the source facts, the live quality preview, the transform controls, the loss list, the verification result and the heat map of changed pixels" width="720" />
@@ -141,8 +143,9 @@ under alpha 0, compared with a plain `===` after decoding the output again.
 | Animated PNG (APNG) to APNG: every frame, delay and the loop count | **yes** | each composited frame decoded again and compared; downloads re-read by UPNG.js in Node; Chromium's and Firefox's own APNG decoders agree |
 | PNG 8-bit RGBA to QOI, QOI sources to any lossless target | **yes** | Airgap's QOI codec is byte-identical to the reference encoder; downloads re-decoded by the reference decoder in Node |
 | Anything through the canvas fallback with transparency | **no** | canvas is premultiplied: semi-transparent RGB rounds, RGB under alpha 0 is zeroed |
-| Any 16-bit source to WebP or JPEG XL | no, 8-bit output | flagged as `bit-depth` |
-| JPEG XL sources deeper than 8 bits | no, read as 8-bit | the decoder's depth above 8 bits is not demonstrated in the browser, so it is not claimed; flagged as `bit-depth` |
+| PNG 16-bit RGBA to JPEG XL lossless, and 16-bit JPEG XL sources | **yes, at 16-bit** | libjxl 0.12 (Airgap's build) writes and reads 16-bit exactly; jxl-oxide confirms (in Firefox it renders 16-bit to 8-bit, so there the registry reads deep files with libjxl) |
+| JPEG to JPEG XL by recompression | **yes, reversible** | the JPEG rebuilt from the JPEG XL equals the JPEG Airgap prepared, byte for byte |
+| Any 16-bit source to WebP | no, 8-bit output | flagged as `bit-depth` |
 | TIFF with associated (premultiplied) alpha | no | un-premultiplying rounds; flagged as `associated-alpha` |
 
 Round trips that are exact today are only ever *offered* as lossless after the
@@ -190,10 +193,44 @@ and deeper JPEG XL sources are read at 8 bits with a `bit-depth` loss listed.
 
 Two details of the jxl-oxide path. It keeps stored values and hands the
 embedded ICC profile back instead of converting to sRGB, so JPEG XL sources
-with a profile now go through the same strip / preserve / convert choice as
-other formats. If it cannot return a profile the file declares, the file
-falls back to libjxl, which converts to sRGB and lists that as a pixel loss.
-libjxl's decoder stays in the bundle for that fallback.
+with a profile go through the same strip / preserve / convert choice as other
+formats. If it cannot return a profile the file declares, the file falls back
+to libjxl's decoder.
+
+### JPEG XL, continued: Airgap builds libjxl 0.12 itself
+
+The 2022 snapshot is gone. Airgap now compiles libjxl v0.12.0 itself
+(`tools/libjxl`: a pinned Dockerfile, a small C interface, single-threaded,
+no `eval` in the glue; see `vendor/README.md`). The probe now reports what
+the newer library can do. Its own decoder is exact, so the off-by-one is
+gone, and it encodes 8 and 16-bit losslessly with invisible pixels kept. It
+also embeds ICC in the codestream and EXIF and XMP as boxes. jxl-oxide stays
+the first decoder and the verifier. Since libjxl can now write 16-bit files,
+jxl-oxide's probe demonstrates 16-bit decoding too, except in Firefox, where
+jxl-oxide-wasm renders 16-bit images to an 8-bit PNG. There the registry
+picks, per file, a decoder that demonstrated the file's depth, which is
+libjxl's own.
+
+## JPEG recompression (JPEG to JPEG XL, reversible)
+
+For a JPEG source, the target "JPEG XL (reversible JPEG recompression)"
+stores the JPEG's DCT coefficients and every marker in a JPEG XL file,
+typically about 20% smaller (the test fixtures: 15% for a 3.4 KB JPEG). From
+that file, libjxl rebuilds the original JPEG byte for byte. No pixel is
+decoded and re-encoded, so nothing is lost and nothing is rotated, and the
+EXIF orientation tag stays.
+
+The metadata modes still apply. Airgap first prepares the JPEG: EXIF is
+stripped or GPS-cleaned, XMP and the ICC profile are kept or dropped. Then it
+recompresses that prepared JPEG. The verification rebuilds the JPEG from the
+JPEG XL and compares it byte for byte with the prepared JPEG; "preserve"
+everything means the original file. It also decodes the JPEG XL and reports
+how far its pixels are from Airgap's own JPEG decode. That difference can be
+a few levels, because JPEG decoders are allowed to differ in IDCT and chroma
+upsampling; the coefficients are identical. Crop, rotation, resizing and
+"convert to sRGB" all change pixels, so they are disabled for this target
+with the reason shown. The e2e suite rebuilds a downloaded file in Node and
+compares it with the original JPEG.
 
 ### RGB under alpha 0 is a pixel loss
 
@@ -333,10 +370,11 @@ It does **not** guarantee:
 If you need certainty, use "strip all".
 
 Which targets can carry what: PNG, JPEG, WebP and TIFF carry EXIF, ICC and
-XMP (verified by the probe: what goes in must come back out). AVIF and
-JPEG XL cannot carry any of them through the codecs in use; choosing
-"preserve" for those targets lists the loss and the post-conversion check
-reports "removed".
+XMP (verified by the probe: what goes in must come back out), and so does
+JPEG XL since Airgap builds libjxl itself (ICC in the codestream, EXIF and XMP
+as boxes). AVIF cannot carry them through the codec in use; choosing
+"preserve" for AVIF lists the loss and the post-conversion check reports
+"removed".
 
 As sources, JPEG XL files have their `Exif` and `xml ` boxes read like any
 other container, so EXIF and XMP from a JPEG XL can be inspected, cleaned and
@@ -483,7 +521,31 @@ canvas precision. `wasm-webp`'s own encoder records a wrong duration for the
 last frame, so its durations are never trusted; the tests read durations
 from the file.
 
-AVIF image sequences are not supported yet.
+## Animated AVIF (image sequences)
+
+AVIF sequences convert to and from APNG and animated WebP, with every frame,
+every duration and the loop count kept and verified. A sequence cannot be
+decoded frame by frame with a still decoder, because AV1 frames refer to one
+another. So Airgap builds libavif 1.4.2 with libaom 3.15.2 itself
+(`tools/libavif`) and uses it for AVIF stills and sequences alike. It
+replaces the jSquash build and is smaller: 1.6 MB against 1.95 MB.
+
+- **Timing is exact.** Durations are stored as fractions of an integer
+  timescale, the least common multiple of the source's delay denominators.
+  So an APNG delay of 1/30 s stays 1/30 s; it is not rounded to milliseconds.
+- **Zero-length frames.** AVIF cannot store a zero duration, and libavif
+  would silently make it one tick. Airgap plans 1 ms instead and says so in
+  the loss list.
+- **Loop count.** libavif counts repetitions after the first play; Airgap,
+  like APNG, counts plays. The conversion between the two is tested both
+  ways.
+
+Evidence: lossless sequences round-trip frame for frame, and stills at 8, 10
+and 12 bits are also read back by the jSquash decoder, a different libavif
+build, as an independent check. Chromium's and Firefox's own AVIF sequence
+decoders (`ImageDecoder`) show the same frames as Airgap writes. WebKit's
+decoder path is not precise enough for that check, which is skipped there
+with the reason.
 
 ## QOI
 
@@ -610,8 +672,8 @@ next decoder is tried for that file and the source panel names the one used.
 | PNG | `airgap-png`: Rust `png` crate decode (8/16-bit) + Airgap's layout-minimising writer | `wasm-png` (Rust encoder, always RGBA), then canvas |
 | JPEG | @jsquash/jpeg (mozjpeg) | canvas |
 | WebP | @jsquash/webp (libwebp, `exact: 1`) | canvas |
-| AVIF | @jsquash/avif (libavif + aom), 8/10/12-bit | canvas (decode only) |
-| JPEG XL | decode and verification: jxl-oxide (independent, from the specification); encode: @jsquash/jxl (libjxl snapshot), 8-bit | decode: libjxl, per file |
+| AVIF | libavif 1.4.2 + libaom 3.15.2 (Airgap's build): stills and sequences, 8/10/12-bit | canvas (decode only) |
+| JPEG XL | decode and verification: jxl-oxide (independent, from the specification); encode, 16-bit, metadata and JPEG recompression: libjxl 0.12.0 (Airgap's build) | decode: libjxl, per file (and for deep files where jxl-oxide cannot keep the depth) |
 | TIFF | utif (decode) + own baseline writer, 8/16-bit | none |
 | QOI | Airgap's own encoder and decoder, written from the specification, 8-bit | none |
 
@@ -636,8 +698,8 @@ Measured with `node scripts/bundle-report.mjs` after `npm run build`
 | JPEG codec (lazy) | 177 KB |
 | WebP codec (lazy) | 228 KB |
 | TIFF (lazy, pure JS) | 28 KB |
-| JPEG XL codecs (lazy): libjxl encoder 0.69 MB, jxl-oxide decoder 0.85 MB, libjxl decoder fallback 0.42 MB | 1.98 MB |
-| AVIF codec (lazy) | 1.95 MB |
+| JPEG XL codecs (lazy): libjxl 0.12 (encode, decode, recompression) 1.32 MB, jxl-oxide decoder 0.85 MB | 2.18 MB |
+| AVIF codec (lazy): libavif + libaom, stills and sequences | 1.60 MB |
 
 A user converting a single JPEG downloads the first two rows plus the codecs
 for JPEG and the chosen target. Base64 embedding costs about 1.3x on the
@@ -672,7 +734,7 @@ src/codecs/probe.ts        runtime capability probe (pure: codec API only)
 src/codecs/registry.ts     per-format ordered codecs, lazy loading, per-file fallback
 src/codecs/canvas.ts       browser canvas fallback (exactAlpha: false)
 src/codecs/png-writer.ts   own PNG writer: minimal exact colour type, adaptive filters
-src/codecs/wasm/*.ts       @jsquash-backed PNG (decode), JPEG, WebP, AVIF, JPEG XL
+src/codecs/wasm/*.ts       @jsquash-backed PNG (decode), JPEG, WebP; libjxl.ts / libavif.ts over Airgap's own builds
 src/codecs/tiff.ts         utif decode + own baseline writer
 src/codecs/qoi.ts          own QOI encoder/decoder from the specification
 src/codecs/apng.ts         own APNG reader (compositing per the spec) and writer
@@ -702,6 +764,8 @@ tests/unit/                Vitest, node: matrix, metadata layer, ICC, PNG writer
 tests/browser/             Vitest browser mode: real codecs, probes, full pipeline, exifr
 tests/e2e/                 Playwright: downloads re-read independently, privacy trap, inspector, compare, recovery, preview, batch, transform
 tests/fixtures/            generated by scripts/make-fixtures.mjs
+tools/libjxl, tools/libavif  pinned Dockerfiles + C interfaces for the codecs Airgap builds itself
+vendor/                    the built codec modules, with SHA256SUMS and provenance (vendor/README.md)
 licenses/                  verbatim licence texts of everything bundled (see THIRD_PARTY_NOTICES.md)
 docs/                      codec survey, screenshots
 ```
