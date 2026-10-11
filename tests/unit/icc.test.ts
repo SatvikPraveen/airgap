@@ -97,8 +97,18 @@ describe('convertToSrgb (Display P3 -> sRGB)', () => {
     expect(out.bitDepth).toBe(16);
     expect(Math.abs(out.data[0]! - 32768)).toBeLessThanOrEqual(1);
   });
-  it('refuses LUT profiles', () => {
+  it('refuses LUT profiles it cannot evaluate exactly (here: CMYK input), naming why', () => {
+    const bytes = extractMetadata(fixture('icc-lut.jpg'), 'jpeg').icc!.slice();
+    bytes.set(new TextEncoder().encode('CMYK'), 16);
+    const lut = parseIcc(bytes);
+    expect(lut.kind).toBe('lut');
+    expect(lut.convertible).toBe(false);
+    expect(() => convertToSrgb(pixelsFrom([1, 2, 3, 255], 1, 1), lut)).toThrow(/CMYK/);
+  });
+  it('evaluates the fixture lut16 profile (identity CLUT, XYZ PCS): black stays black', () => {
     const lut = parseIcc(extractMetadata(fixture('icc-lut.jpg'), 'jpeg').icc!);
-    expect(() => convertToSrgb(pixelsFrom([1, 2, 3, 255], 1, 1), lut)).toThrow(/lut/);
+    expect(lut.convertible).toBe(true);
+    expect(lut.lut?.type).toBe('mft2');
+    expect(Array.from(convertToSrgb(pixelsFrom([0, 0, 0, 255], 1, 1), lut).data)).toEqual([0, 0, 0, 255]);
   });
 });

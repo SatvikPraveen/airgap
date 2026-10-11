@@ -36,7 +36,7 @@ const sources: Record<string, SourceDescription> = {
   apng: src('png', { isAnimated: true, sourceLossless: true }),
   'jpeg plain': src('jpeg', { sourceLossless: false }),
   'jpeg exif+gps': src('jpeg', { hasExif: true, hasGps: true, orientation: 6, sourceLossless: false }),
-  'jpeg icc matrix': src('jpeg', { hasIcc: true, iccKind: 'matrix', sourceLossless: false }),
+  'jpeg icc matrix': src('jpeg', { hasIcc: true, iccKind: 'matrix', iccConvertible: true, sourceLossless: false }),
   'webp lossless alpha partial': src('webp', { hasAlpha: true, hasTransparency: true, hasSemiTransparency: true, sourceLossless: true }),
   'avif 10-bit alpha': src('avif', { bitDepth: 10, hasAlpha: true, hasTransparency: true, hasSemiTransparency: true }),
   'avif 12-bit': src('avif', { bitDepth: 12 }),
@@ -201,10 +201,15 @@ describe('ICC modes', () => {
     expect(l[0]!.message).toMatch(/Appearance is preserved; values change/);
     expect(isPixelLossless(l)).toBe(false);
   });
-  it('convert-srgb on a LUT profile is refused, never approximated', () => {
+  it('convert-srgb on a LUT profile that cannot be evaluated is refused, never approximated', () => {
     const l = computeLosses(lut, t('convert-srgb'), pipe());
     expect(l.map((x) => x.kind)).toEqual(['icc-convert-unavailable']);
-    expect(l[0]!.message).toMatch(/will not approximate/);
+    expect(l[0]!.message).toMatch(/never approximates/);
+  });
+  it('convert-srgb on an evaluable LUT profile is a PIXELS loss that says how it is evaluated', () => {
+    const l = computeLosses(src('jpeg', { hasIcc: true, iccKind: 'lut', iccConvertible: true }), t('convert-srgb'), pipe());
+    expect(l.map((x) => x.kind)).toEqual(['icc-convert']);
+    expect(l[0]!.message).toMatch(/tetrahedral interpolation/);
   });
   it('a decoder that applies ICC itself reports the conversion regardless of mode', () => {
     const jxlIcc = src('jxl', { hasIcc: true });

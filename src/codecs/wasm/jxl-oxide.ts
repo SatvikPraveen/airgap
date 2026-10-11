@@ -58,6 +58,7 @@ export async function createJxlOxideCodec(): Promise<Codec> {
           metadata.icc = decoded.metadata.icc;
           if (decoded.metadata.iccKind) metadata.iccKind = decoded.metadata.iccKind;
           if (decoded.metadata.iccDescription) metadata.iccDescription = decoded.metadata.iccDescription;
+          if (decoded.metadata.iccConvertible !== undefined) metadata.iccConvertible = decoded.metadata.iccConvertible;
         }
         return asDecoded(decoded.pixels, metadata);
       } finally {

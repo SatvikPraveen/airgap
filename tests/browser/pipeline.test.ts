@@ -146,8 +146,11 @@ describe('ICC modes through real codecs', () => {
     const greyIdx = P.P3_PATCHES.findIndex((p) => p[0] === 128) * 2 * 4;
     expect(Array.from(out.pixels.data.slice(greyIdx, greyIdx + 3))).toEqual([128, 128, 128]);
   });
-  it('convert-srgb on a LUT profile is refused', async () => {
-    await expect(run('icc-lut.jpg', { format: 'png', iccMode: 'convert-srgb' })).rejects.toThrow(/lut/);
+  it('convert-srgb on an evaluable LUT profile converts; one it cannot evaluate is refused', async () => {
+    const r = await run('icc-lut.jpg', { format: 'png', iccMode: 'convert-srgb' });
+    expect(r.result.verification.comparedAgainstConverted).toBe(true);
+    expect(r.result.verification.metadata.icc).toBe('removed');
+    await expect(run('icc-lut-btoa.jpg', { format: 'png', iccMode: 'convert-srgb' })).rejects.toThrow(/BtoA only/);
   });
   it('strip: values unchanged, profile gone', async () => {
     const r = await run('icc-p3.png', { format: 'png', iccMode: 'strip' });

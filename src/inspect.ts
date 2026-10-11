@@ -9,7 +9,7 @@
 import type { ColorDescription, ImageFormat, ImageMetadata } from './codecs/types';
 import { findEntry, parseTiffStructure, readNumber, readNumbers, TAG } from './metadata/tiff-ifd';
 
-export type HeaderMetadata = Omit<ImageMetadata, 'hasTransparency' | 'hasSemiTransparency' | 'exif' | 'icc' | 'xmp' | 'iccKind' | 'iccDescription'>;
+export type HeaderMetadata = Omit<ImageMetadata, 'hasTransparency' | 'hasSemiTransparency' | 'exif' | 'icc' | 'xmp' | 'iccKind' | 'iccDescription' | 'iccConvertible'>;
 
 export interface HeaderInfo {
   format: ImageFormat;

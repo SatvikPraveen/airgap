@@ -80,6 +80,8 @@ export interface ImageMetadata {
   /** Parsed ICC facts, when the profile bytes were extracted. */
   iccKind?: IccKind;
   iccDescription?: string;
+  /** The profile can be evaluated exactly to sRGB (matrix/TRC, or a supported RGB LUT). */
+  iccConvertible?: boolean;
   /** EXIF orientation tag value as stored in the file (1 = upright). */
   orientation?: number;
   /** The decoder already rotated the pixels (libjxl does); do not apply `orientation` again. */

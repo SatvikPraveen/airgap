@@ -7,7 +7,7 @@
  * container layer (src/metadata/containers.ts) around the canvas, not by it.
  */
 import { extractMetadata, injectMetadata } from '../metadata/containers';
-import { parseIcc } from '../metadata/icc';
+import { iccFacts } from '../metadata/icc';
 import { inspect } from '../inspect';
 import { alphaStats } from '../pixels';
 import { MIME, type Codec, type CodecCapabilities, type DecodedImage, type EncodeOptions, type ImageFormat } from './types';
@@ -58,15 +58,7 @@ export async function decodeViaCanvas(bytes: Uint8Array, format: ImageFormat): P
     const pixels = { width: img.width, height: img.height, bitDepth: 8, data: img.data };
     const stats = header.metadata.hasAlpha ? alphaStats(pixels) : { hasTransparency: false, hasSemiTransparency: false };
     const metadata: DecodedImage['metadata'] = { ...header.metadata, ...stats, ...payloads };
-    if (payloads.icc) {
-      try {
-        const p = parseIcc(payloads.icc);
-        metadata.iccKind = p.kind;
-        metadata.iccDescription = p.description;
-      } catch {
-        metadata.iccKind = 'unknown';
-      }
-    }
+    if (payloads.icc) Object.assign(metadata, iccFacts(payloads.icc));
     return { pixels, metadata };
   } finally {
     bitmap.close();

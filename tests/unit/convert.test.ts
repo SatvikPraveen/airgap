@@ -243,11 +243,20 @@ describe('convert(): ICC', () => {
     expect(Array.from(out.pixels.data.slice(4, 8))).toEqual([128, 128, 128, 255]); // grey stays grey
     expect(out.pixels.data[1]).toBe(0); // P3 red -> sRGB red clipped: green stays 0
   });
-  it('convert-srgb on a LUT profile throws rather than approximating', async () => {
+  it('convert-srgb on a LUT profile it cannot evaluate (CMYK input) throws rather than approximating', async () => {
+    const c = fakeCodec('png');
+    const lut = extractMetadata(fixture('icc-lut.jpg'), 'jpeg').icc!.slice();
+    lut.set(new TextEncoder().encode('CMYK'), 16);
+    const src = img(pixelsFrom([1, 2, 3, 255], 1, 1), { hasIcc: true, iccKind: 'lut', icc: lut });
+    await expect(convert(pipe(c), src, 'jpeg', { target: target('png', true, { iccMode: 'convert-srgb' }) })).rejects.toThrow(/CMYK/);
+  });
+  it('convert-srgb on an evaluable LUT profile converts and drops the profile', async () => {
     const c = fakeCodec('png');
     const lut = extractMetadata(fixture('icc-lut.jpg'), 'jpeg').icc!;
-    const src = img(pixelsFrom([1, 2, 3, 255], 1, 1), { hasIcc: true, iccKind: 'lut', icc: lut });
-    await expect(convert(pipe(c), src, 'jpeg', { target: target('png', true, { iccMode: 'convert-srgb' }) })).rejects.toThrow(/lut/);
+    const src = img(pixelsFrom([0, 0, 0, 255, 255, 255, 255, 255], 2, 1), { hasIcc: true, iccKind: 'lut', iccConvertible: true, icc: lut });
+    const r = await convert(pipe(c), src, 'jpeg', { target: target('png', true, { iccMode: 'convert-srgb' }) });
+    expect(r.verification.comparedAgainstConverted).toBe(true);
+    expect(c.calls[0]!.icc).toBeUndefined();
   });
 });
 

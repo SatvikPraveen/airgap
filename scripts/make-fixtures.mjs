@@ -16,6 +16,7 @@
  *   exif-orient6.jpg    48x32  JPEG, EXIF Orientation=6 + GPS, quadrant colours
  *   icc-p3.png          16x16  8-bit RGB PNG with an iCCP Display P3 (matrix/TRC) profile
  *   icc-lut.jpg         64x48  JPEG with an APP2 LUT-based (A2B0) ICC profile
+ *   icc-lut-btoa.jpg    64x48  JPEG with a LUT profile that has only a B2A0 tag (cannot be read as input)
  *   rgb8.tif            64x48  8-bit RGB TIFF, uncompressed, big-endian
  *   rgba-partial.tif    64x48  8-bit RGBA TIFF, ExtraSamples=2 (straight alpha)
  *   rgb16.tif           32x32  16-bit RGB TIFF
@@ -387,7 +388,7 @@ export function displayP3Icc() {
     ['bTRC', trc],
   ]);
 }
-function lutIcc() {
+function lutIcc({ btoaOnly = false } = {}) {
   // Minimal 'mft2' (lut16Type) A2B0: 3 in, 3 out, 2 grid points, identity matrix, 2-entry tables.
   const mft = Buffer.alloc(8 + 4 + 36 + 4 + 3 * 2 * 2 + 8 * 3 * 2 + 3 * 2 * 2);
   mft.write('mft2', 0, 'ascii');
@@ -422,7 +423,7 @@ function lutIcc() {
     ['desc', descTag('LUT profile (fixture)')],
     ['cprt', textTag('no copyright')],
     ['wtpt', xyzTag(0.9642, 1.0, 0.8249)],
-    ['A2B0', mft],
+    ...(btoaOnly ? [] : [['A2B0', mft]]),
     ['B2A0', mft],
   ]);
 }
@@ -479,6 +480,7 @@ write('rgba16.png', png16(P.RGBA16, 6, (x, y) => P.rgba16Pixel(x, y)));
   const rgba = raster8(P.EXIF_GPS, (x, y) => P.rgb8Pixel(x, y, noise));
   write('exif-gps.jpg', jpegWithSegments(rgba, P.EXIF_GPS, [jpegApp1Exif(buildTiff(exifEntries({ orientation: 1 })))]));
   write('icc-lut.jpg', jpegWithSegments(rgba, P.EXIF_GPS, [jpegApp2Icc(lutIcc())]));
+  write('icc-lut-btoa.jpg', jpegWithSegments(rgba, P.EXIF_GPS, [jpegApp2Icc(lutIcc({ btoaOnly: true }))]));
 }
 {
   // location-everywhere.jpg: GPS IFD + MakerNote + XMP + thumbnail with its own EXIF GPS.

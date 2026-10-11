@@ -208,17 +208,20 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
       message: `The ${label(source.format)} decoder in use converts pixels through the embedded profile to sRGB and cannot be told not to. Appearance is preserved; values change. The profile itself is not carried.`,
     });
   } else if (m.hasIcc && target.iccMode === 'convert-srgb') {
-    if (m.iccKind === 'matrix') {
+    if (m.iccConvertible) {
       losses.push({
         kind: 'icc-convert',
         severity: 'pixels',
-        message: 'Pixel values will be converted from the embedded profile to sRGB. Appearance is preserved; values change and out-of-gamut colours are clipped. The profile is then dropped because the output is sRGB.',
+        message:
+          m.iccKind === 'lut'
+            ? 'Pixel values will be converted from the embedded LUT-based profile to sRGB: its curves and colour look-up table are evaluated exactly (tetrahedral interpolation, as LittleCMS does). Appearance is preserved; values change and out-of-gamut colours are clipped. The profile is then dropped because the output is sRGB.'
+            : 'Pixel values will be converted from the embedded profile to sRGB. Appearance is preserved; values change and out-of-gamut colours are clipped. The profile is then dropped because the output is sRGB.',
       });
     } else {
       losses.push({
         kind: 'icc-convert-unavailable',
         severity: 'pixels',
-        message: `Conversion to sRGB is not available for this profile (${m.iccKind ?? 'unknown'} kind). Airgap only converts matrix/TRC profiles and will not approximate a LUT-based one. Choose "preserve" or "strip".`,
+        message: `Conversion to sRGB is not available for this profile (${m.iccKind ?? 'unknown'} kind, not one Airgap can evaluate exactly). Airgap converts matrix/TRC profiles and RGB LUT profiles (lut8, lut16, lutAtoB) and never approximates one with the other. Choose "preserve" or "strip".`,
       });
     }
   }

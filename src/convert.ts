@@ -81,12 +81,12 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   let pixels: PixelData = source.pixels;
   let converted = false;
 
-  // 1. Colour: convert to sRGB if asked (matrix/TRC profiles only).
+  // 1. Colour: convert to sRGB if asked (matrix/TRC or evaluable LUT profiles).
   let iccOut: Uint8Array | undefined = m.icc;
   if (m.icc && target.iccMode === 'convert-srgb' && !p.decoderCaps.decodeAppliesIcc) {
     const profile = parseIcc(m.icc);
-    if (profile.kind !== 'matrix') {
-      throw new Error(`Cannot convert a ${profile.kind} ICC profile to sRGB; choose preserve or strip.`);
+    if (!profile.convertible) {
+      throw new Error(`Cannot convert this ${profile.kind} ICC profile to sRGB${profile.lutUnsupported ? ` (${profile.lutUnsupported})` : ''}; choose preserve or strip.`);
     }
     pixels = convertToSrgb(pixels, profile);
     converted = true;

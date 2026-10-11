@@ -1,6 +1,6 @@
 /** Helpers shared by the jSquash-backed codecs. */
 import { extractMetadata } from '../../metadata/containers';
-import { parseIcc } from '../../metadata/icc';
+import { iccFacts } from '../../metadata/icc';
 import { inspect } from '../../inspect';
 import { alphaStats } from '../../pixels';
 import type { DecodedImage, ImageFormat, ImageMetadata, PixelData } from '../types';
@@ -34,15 +34,7 @@ export function buildMetadata(bytes: Uint8Array, format: ImageFormat, pixels: Pi
   const stats = header.metadata.hasAlpha ? alphaStats(pixels) : { hasTransparency: false, hasSemiTransparency: false };
   const payloads = extractMetadata(bytes, format);
   const metadata: ImageMetadata = { ...header.metadata, ...stats, ...payloads, ...extra };
-  if (payloads.icc) {
-    try {
-      const p = parseIcc(payloads.icc);
-      metadata.iccKind = p.kind;
-      metadata.iccDescription = p.description;
-    } catch {
-      metadata.iccKind = 'unknown';
-    }
-  }
+  if (payloads.icc) Object.assign(metadata, iccFacts(payloads.icc));
   return metadata;
 }
 

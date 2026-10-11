@@ -8,7 +8,7 @@
  * The writer is validated in tests against two independent readers (utif and
  * image-js `tiff`), never only against its matching reader.
  */
-import { parseIcc } from '../metadata/icc';
+import { iccFacts } from '../metadata/icc';
 import {
   concat,
   entryBlob,
@@ -119,13 +119,7 @@ async function decodeTiff(bytes: Uint8Array): Promise<DecodedImage> {
   if (exif) metadata.exif = exif;
   if (iccEntry) {
     metadata.icc = iccEntry.value;
-    try {
-      const p = parseIcc(iccEntry.value);
-      metadata.iccKind = p.kind;
-      metadata.iccDescription = p.description;
-    } catch {
-      metadata.iccKind = 'unknown';
-    }
+    Object.assign(metadata, iccFacts(iccEntry.value));
   }
   if (xmpEntry) metadata.xmp = xmpEntry.value;
   const orientationEntry = findEntry(structure.ifd0, TAG.Orientation);
