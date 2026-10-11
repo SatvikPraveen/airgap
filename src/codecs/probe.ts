@@ -84,7 +84,14 @@ function bytesEqual(a: Uint8Array | undefined, b: Uint8Array): boolean {
   return true;
 }
 
-export async function probeCodec(codec: Codec, independentDecoder?: Codec): Promise<ResolvedCodec> {
+/**
+ * @param independentDecoder a decoder sharing no code with `codec`: cross-checks opaque pixels and, when
+ *   it decodes exactly itself (exactAlpha), can demonstrate that the ENCODER is exact even if `codec`'s
+ *   own decoder is not. The capabilities then say so: lossless (encoder) true, decodeExact false.
+ * @param referenceEncoder for a decode-only codec: a lossless encoder of the same format. Decoding its
+ *   output of the probe image exactly demonstrates the decoder (and the encoder) at 8 bits.
+ */
+export async function probeCodec(codec: Codec, independentDecoder?: Codec, referenceEncoder?: Codec): Promise<ResolvedCodec> {
   const claimed = codec.capabilities;
   const caps: CodecCapabilities = {
     ...claimed,
@@ -98,12 +105,42 @@ export async function probeCodec(codec: Codec, independentDecoder?: Codec): Prom
   };
 
   if (!claimed.encode) {
-    caps.decodeExact = false;
-    return {
-      codecId: codec.id,
-      capabilities: caps,
-      probe: { codecId: codec.id, ok: true, detail: 'decoder only; verified by the post-conversion comparison at use', checks },
-    };
+    if (!referenceEncoder || !referenceEncoder.capabilities.encode || !referenceEncoder.capabilities.lossless) {
+      caps.decodeExact = false;
+      return {
+        codecId: codec.id,
+        capabilities: caps,
+        probe: { codecId: codec.id, ok: true, detail: 'decoder only; verified by the post-conversion comparison at use', checks },
+      };
+    }
+    try {
+      const alpha = claimed.alpha && referenceEncoder.capabilities.alpha;
+      const src8 = probeImage(PROBE_SIZE, 8, alpha);
+      const bytes = await referenceEncoder.encode(image(src8, alpha), { lossless: true });
+      const back = await codec.decode(bytes);
+      const sameDepth = back.pixels.bitDepth === 8;
+      const back8 = convertBitDepth(back.pixels, 8);
+      const opaqueOk = sameDepth && opaqueIdentical(src8, back8);
+      const full = comparePixels(src8, back8);
+      caps.decodeExact = opaqueOk;
+      check('decodeExact', claimed.decodeExact, opaqueOk);
+      if (alpha) {
+        caps.exactAlpha = claimed.exactAlpha && sameDepth && full.identical;
+        check('exactAlpha', claimed.exactAlpha, caps.exactAlpha);
+      }
+      // Only 8-bit input could be demonstrated (the reference encoder's depth); claim no more.
+      caps.decodeBitDepth = Math.min(claimed.decodeBitDepth, 8);
+      notes.push(
+        full.identical
+          ? `decodes a lossless ${referenceEncoder.id} encoding of the probe image exactly (every sample${alpha ? ', RGB under alpha 0 included' : ''})`
+          : `does NOT reproduce a lossless ${referenceEncoder.id} encoding of the probe image (${full.differingPixels} px differ, max diff ${full.maxChannelDiff}); one of the two is not exact`,
+      );
+      notes.push(`depth above 8 bits not demonstrated (the reference encoder writes 8-bit only), so treated as 8-bit`);
+    } catch (err) {
+      caps.decodeExact = false;
+      notes.push(`decoder not demonstrated: ${(err as Error).message}`);
+    }
+    return { codecId: codec.id, capabilities: caps, probe: { codecId: codec.id, ok: true, detail: notes.join('; '), checks } };
   }
 
   try {
@@ -114,38 +151,42 @@ export async function probeCodec(codec: Codec, independentDecoder?: Codec): Prom
     const back = await codec.decode(bytes);
     const back8 = convertBitDepth(back.pixels, 8);
     if (lossless) {
-      const opaqueOk = opaqueIdentical(src8, back8);
-      caps.lossless = opaqueOk;
-      caps.decodeExact = opaqueOk;
-      check('lossless', true, opaqueOk);
-      check('decodeExact', claimed.decodeExact, opaqueOk);
-      if (!opaqueOk) {
-        const cmp = comparePixels(src8, back8);
-        notes.push(`round trip NOT identical on opaque pixels (${cmp.differingPixels} px differ, max diff ${cmp.maxChannelDiff})`);
-      }
-      if (claimed.alpha) {
-        const cmp = comparePixels(src8, back8);
-        caps.exactAlpha = claimed.exactAlpha && cmp.identical;
-        check('exactAlpha', claimed.exactAlpha, cmp.identical);
-        notes.push(
-          cmp.identical
-            ? 'RGBA round trip exact, including RGB under alpha 0 and semi-transparent pixels'
-            : `RGBA round trip NOT exact (${cmp.differingPixels} px differ, max diff ${cmp.maxChannelDiff})`,
-        );
-      }
-      // Cross-check opaque pixels with an independent decoder when one exists.
+      const ownOpaque = opaqueIdentical(src8, back8);
+      const own = comparePixels(src8, back8);
+      // An independent decoder that reproduces the source exactly shows the BITSTREAM is exact.
+      let indepOpaque: boolean | undefined;
+      let indepFull = false;
       if (independentDecoder && independentDecoder.id !== codec.id) {
         try {
           const other = await independentDecoder.decode(bytes);
-          const ok = opaqueIdentical(src8, convertBitDepth(other.pixels, 8));
-          check('independentDecode', true, ok);
-          if (!ok) {
-            caps.lossless = false;
-            notes.push(`independent decoder (${independentDecoder.id}) disagrees on opaque pixels`);
-          } else notes.push(`opaque pixels confirmed by ${independentDecoder.id}`);
+          const other8 = convertBitDepth(other.pixels, 8);
+          indepOpaque = opaqueIdentical(src8, other8);
+          indepFull = independentDecoder.capabilities.exactAlpha && comparePixels(src8, other8).identical;
+          check('independentDecode', true, indepOpaque);
         } catch (err) {
           notes.push(`no independent cross-check (${independentDecoder.id} cannot decode this output: ${(err as Error).message})`);
         }
+      }
+      // Own round trip exact: an independent disagreement still vetoes. Own round trip inexact: the
+      // encoder is exact only if the independent decoder says so, and then the fault is the decoder's.
+      caps.lossless = ownOpaque ? indepOpaque !== false : indepOpaque === true;
+      caps.decodeExact = ownOpaque;
+      check('lossless', true, caps.lossless);
+      check('decodeExact', claimed.decodeExact, ownOpaque);
+      if (!ownOpaque) notes.push(`own round trip NOT identical on opaque pixels (${own.differingPixels} px differ, max diff ${own.maxChannelDiff})`);
+      if (indepOpaque === true) notes.push(ownOpaque ? `opaque pixels confirmed by ${independentDecoder!.id}` : `${independentDecoder!.id} decodes this encoder's output exactly: the encoder is exact and its paired decoder is at fault`);
+      else if (indepOpaque === false) notes.push(`independent decoder (${independentDecoder!.id}) disagrees on opaque pixels`);
+      if (claimed.alpha) {
+        const exact = own.identical || (!ownOpaque && indepFull);
+        caps.exactAlpha = claimed.exactAlpha && caps.lossless && exact;
+        check('exactAlpha', claimed.exactAlpha, caps.exactAlpha);
+        notes.push(
+          own.identical
+            ? 'RGBA round trip exact, including RGB under alpha 0 and semi-transparent pixels'
+            : indepFull
+              ? `RGBA exact through ${independentDecoder!.id}, including RGB under alpha 0`
+              : `RGBA round trip NOT exact (${own.differingPixels} px differ, max diff ${own.maxChannelDiff})`,
+        );
       }
     } else {
       caps.exactAlpha = false;
