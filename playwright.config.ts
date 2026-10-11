@@ -11,6 +11,9 @@ const BROWSERS = (process.env['AIRGAP_BROWSERS'] ?? 'chromium').split(',').map((
 export default defineConfig({
   testDir: 'tests/e2e',
   fullyParallel: true,
+  // Above the helpers' own 60 s waits for a conversion, so those waits decide. The
+  // 30 s default cut off a cold libjxl + jxl-oxide load in Firefox on a CI runner.
+  timeout: 90_000,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI ? 'github' : 'list',
