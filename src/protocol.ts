@@ -26,24 +26,33 @@ export type ToWorker =
   | { type: 'ensure'; format: ImageFormat; role: 'decode' | 'encode' }
   | { type: 'load'; id: number; bytes: ArrayBuffer }
   | { type: 'convert'; id: number; plan: ConversionPlan }
+  /**
+   * Same pipeline as 'convert', run for the quality preview. `requestId` increases
+   * monotonically per page; the worker skips a preview it has already seen a newer
+   * request for (wasm cannot be interrupted, but a queued request can be dropped).
+   */
+  | { type: 'preview'; id: number; requestId: number; plan: ConversionPlan }
   | { type: 'unload'; id: number };
+
+/** What a conversion produced, as sent to the UI. Bytes and mask are transferred. */
+export interface ConvertedPayload {
+  bytes: ArrayBuffer;
+  mime: string;
+  format: ImageFormat;
+  bitDepth: number;
+  encoderId: string;
+  colorLayout?: string;
+  verification: Verification;
+  /** width*height bytes; present only when the output is not identical. Transferred. */
+  diffMask?: ArrayBuffer;
+}
 
 export type FromWorker =
   | { type: 'ready'; caps: CapabilityTable }
   | { type: 'caps'; caps: CapabilityTable; format: ImageFormat; role: 'decode' | 'encode'; error?: string }
   | { type: 'loaded'; id: number; info: SourceInfo; caps: CapabilityTable }
-  | {
-      type: 'converted';
-      id: number;
-      bytes: ArrayBuffer;
-      mime: string;
-      format: ImageFormat;
-      bitDepth: number;
-      encoderId: string;
-      colorLayout?: string;
-      verification: Verification;
-      /** width*height bytes; present only when the output is not identical. Transferred. */
-      diffMask?: ArrayBuffer;
-      caps: CapabilityTable;
-    }
-  | { type: 'error'; id: number | null; message: string; name: string };
+  | ({ type: 'converted'; id: number; caps: CapabilityTable } & ConvertedPayload)
+  | ({ type: 'previewed'; id: number; requestId: number; stale: false; caps: CapabilityTable } & ConvertedPayload)
+  /** A newer preview request for the same image arrived before this one ran; nothing was encoded. */
+  | { type: 'previewed'; id: number; requestId: number; stale: true; caps: CapabilityTable }
+  | { type: 'error'; id: number | null; requestId?: number; message: string; name: string };

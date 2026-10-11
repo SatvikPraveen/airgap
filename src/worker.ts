@@ -10,7 +10,7 @@ import { convert, prepareSource } from './convert';
 import { sniffFormat, UnsupportedFormatError } from './inspect';
 import { summarizeExif } from './metadata/exif';
 import { listExifTags } from './metadata/exif-list';
-import type { FromWorker, SourceInfo, ToWorker } from './protocol';
+import type { ConvertedPayload, FromWorker, SourceInfo, ToWorker } from './protocol';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -18,14 +18,16 @@ const registry = new CodecRegistry();
 /** XMP is shown as text in the inspector; cap what travels to the UI. */
 const XMP_DISPLAY_LIMIT = 16 * 1024;
 const images = new Map<number, { decoded: DecodedImage; format: ImageFormat }>();
+/** Newest preview request id seen per image; older queued requests are skipped. */
+const latestPreview = new Map<number, number>();
 
 function post(msg: FromWorker, transfer: Transferable[] = []): void {
   self.postMessage(msg, transfer);
 }
 
-function fail(id: number | null, err: unknown): void {
+function fail(id: number | null, err: unknown, requestId?: number): void {
   const e = err instanceof Error ? err : new Error(String(err));
-  post({ type: 'error', id, message: e.message, name: e.name });
+  post({ type: 'error', id, ...(requestId !== undefined && { requestId }), message: e.message, name: e.name });
 }
 
 async function init(): Promise<void> {
@@ -78,11 +80,16 @@ async function load(id: number, buffer: ArrayBuffer): Promise<void> {
   post({ type: 'loaded', id, info, caps: registry.table() });
 }
 
-async function doConvert(id: number, plan: Parameters<typeof convert>[3]): Promise<void> {
+type Plan = Parameters<typeof convert>[3];
+
+/** Runs the full pipeline (encode, re-decode, compare, re-read metadata) on a loaded image. */
+async function runPipeline(id: number, plan: Plan, isCurrent: () => boolean = () => true): Promise<{ payload: ConvertedPayload; transfer: Transferable[] } | null> {
   const entry = images.get(id);
   if (!entry) throw new Error('Image not loaded (or already discarded).');
   const enc = await registry.resolve(plan.target.format, 'encode');
   const ver = await registry.resolve(plan.target.format, 'decode');
+  // Codec loading yields to the event loop; a newer request may have arrived meanwhile.
+  if (!isCurrent()) return null;
   const dec = registry.table()[entry.format]?.decode;
   const result = await convert(
     { encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: dec?.capabilities ?? ver.resolved.capabilities, verifier: ver.codec },
@@ -92,22 +99,37 @@ async function doConvert(id: number, plan: Parameters<typeof convert>[3]): Promi
   );
   const buffer = result.bytes.buffer.slice(result.bytes.byteOffset, result.bytes.byteOffset + result.bytes.byteLength) as ArrayBuffer;
   const mask = result.diffMask ? (result.diffMask.buffer.slice(result.diffMask.byteOffset, result.diffMask.byteOffset + result.diffMask.byteLength) as ArrayBuffer) : undefined;
-  post(
-    {
-      type: 'converted',
-      id,
-      bytes: buffer,
-      mime: result.mime,
-      format: result.format,
-      bitDepth: result.bitDepth,
-      encoderId: result.encoderId,
-      ...(result.colorLayout && { colorLayout: result.colorLayout }),
-      verification: result.verification,
-      ...(mask && { diffMask: mask }),
-      caps: registry.table(),
-    },
-    mask ? [buffer, mask] : [buffer],
-  );
+  const payload: ConvertedPayload = {
+    bytes: buffer,
+    mime: result.mime,
+    format: result.format,
+    bitDepth: result.bitDepth,
+    encoderId: result.encoderId,
+    ...(result.colorLayout && { colorLayout: result.colorLayout }),
+    verification: result.verification,
+    ...(mask && { diffMask: mask }),
+  };
+  return { payload, transfer: mask ? [buffer, mask] : [buffer] };
+}
+
+async function doConvert(id: number, plan: Plan): Promise<void> {
+  const r = await runPipeline(id, plan);
+  if (!r) return;
+  post({ type: 'converted', id, caps: registry.table(), ...r.payload }, r.transfer);
+}
+
+/**
+ * The preview is the real pipeline at the real settings, so its numbers are what Convert
+ * will produce, not an estimate. Only the newest request per image is worth running.
+ */
+async function doPreview(id: number, requestId: number, plan: Plan): Promise<void> {
+  const isCurrent = () => latestPreview.get(id) === requestId;
+  const r = isCurrent() ? await runPipeline(id, plan, isCurrent) : null;
+  if (!r) {
+    post({ type: 'previewed', id, requestId, stale: true, caps: registry.table() });
+    return;
+  }
+  post({ type: 'previewed', id, requestId, stale: false, caps: registry.table(), ...r.payload }, r.transfer);
 }
 
 self.onmessage = (ev: MessageEvent<ToWorker>) => {
@@ -125,8 +147,13 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
     case 'convert':
       doConvert(msg.id, msg.plan).catch((e) => fail(msg.id, e));
       break;
+    case 'preview':
+      latestPreview.set(msg.id, msg.requestId);
+      doPreview(msg.id, msg.requestId, msg.plan).catch((e) => fail(msg.id, e, msg.requestId));
+      break;
     case 'unload':
       images.delete(msg.id);
+      latestPreview.delete(msg.id);
       break;
   }
 };

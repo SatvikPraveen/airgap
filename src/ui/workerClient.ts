@@ -6,7 +6,7 @@
  */
 import type { CapabilityTable, ImageFormat } from '../codecs/types';
 import type { ConversionPlan, Verification } from '../convert';
-import type { FromWorker, SourceInfo, ToWorker } from '../protocol';
+import type { ConvertedPayload, FromWorker, SourceInfo, ToWorker } from '../protocol';
 import BootWorker from '../worker-boot.ts?worker&inline';
 import workerModuleUrl from '../worker.ts?worker&url';
 
@@ -30,6 +30,19 @@ export class WorkerCrashedError extends Error {
 }
 
 type Pending = { resolve: (m: FromWorker) => void; reject: (e: Error) => void };
+
+function toMessage(m: ConvertedPayload): ConvertedMessage {
+  return {
+    bytes: m.bytes,
+    mime: m.mime,
+    format: m.format,
+    bitDepth: m.bitDepth,
+    encoderId: m.encoderId,
+    ...(m.colorLayout && { colorLayout: m.colorLayout }),
+    verification: m.verification,
+    ...(m.diffMask && { diffMask: new Uint8Array(m.diffMask) }),
+  };
+}
 
 export class WorkerClient {
   private worker!: Worker;
@@ -84,7 +97,15 @@ export class WorkerClient {
   private dispatch(msg: FromWorker): void {
     if ('caps' in msg && msg.caps) this.onCaps(msg.caps);
     const key =
-      msg.type === 'ready' ? 'init' : msg.type === 'caps' ? `ensure:${msg.format}:${msg.role}` : msg.id === null ? 'init' : `id:${msg.id}`;
+      msg.type === 'ready'
+        ? 'init'
+        : msg.type === 'caps'
+          ? `ensure:${msg.format}:${msg.role}`
+          : msg.type === 'previewed' || (msg.type === 'error' && msg.requestId !== undefined)
+            ? `preview:${msg.requestId}`
+            : msg.id === null
+              ? 'init'
+              : `id:${msg.id}`;
     const p = this.pending.get(key);
     if (!p) return;
     this.pending.delete(key);
@@ -128,16 +149,17 @@ export class WorkerClient {
   async convert(id: number, plan: ConversionPlan): Promise<ConvertedMessage> {
     const m = await this.send({ type: 'convert', id, plan }, `id:${id}`);
     if (m.type !== 'converted') throw new Error('unexpected worker reply');
-    return {
-      bytes: m.bytes,
-      mime: m.mime,
-      format: m.format,
-      bitDepth: m.bitDepth,
-      encoderId: m.encoderId,
-      ...(m.colorLayout && { colorLayout: m.colorLayout }),
-      verification: m.verification,
-      ...(m.diffMask && { diffMask: new Uint8Array(m.diffMask) }),
-    };
+    return toMessage(m);
+  }
+
+  /**
+   * Runs the real pipeline for a quality preview. Resolves to null when the worker
+   * skipped the request because a newer one for the same image had already arrived.
+   */
+  async preview(id: number, requestId: number, plan: ConversionPlan): Promise<ConvertedMessage | null> {
+    const m = await this.send({ type: 'preview', id, requestId, plan }, `preview:${requestId}`);
+    if (m.type !== 'previewed') throw new Error('unexpected worker reply');
+    return m.stale ? null : toMessage(m);
   }
 
   unload(id: number): void {
