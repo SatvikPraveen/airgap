@@ -29,6 +29,15 @@ test suites, which run in Chromium, Firefox and WebKit.
 - Codec builds are reproducible: pinned Dockerfiles, SHA256SUMS, and a
   workflow that rebuilds and compares.
 
+- **HEIC, read only**, through the browser's or operating system's own
+  licensed decoder; Airgap ships no HEVC code. Safari's image decoder is
+  tried first. Otherwise Airgap reads the HEIF container itself (grids, alpha,
+  rotation) and decodes the HEVC tiles with WebCodecs, converting YUV to RGB
+  itself. That reaches Chrome where the system has an HEVC decoder. HEIC is
+  never a target and always carries the decoder-unverified loss.
+- Tests can run in Google Chrome (`AIRGAP_BROWSERS=chrome`) as well as
+  Playwright's Chromium, Firefox and WebKit.
+
 ### Fixed
 - Licence texts: libaom's patent licence, libjxl's patent grant and skcms's
   licence are now included verbatim (they were missing).

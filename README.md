@@ -15,7 +15,8 @@ Live: **https://satvikpraveen.github.io/airgap/**
 Formats: PNG, JPEG, WebP, AVIF, JPEG XL, TIFF and QOI in and out, with
 animations (APNG, animated WebP, AVIF sequences) kept frame for frame, and
 JPEG to JPEG XL recompression that rebuilds the original JPEG byte for byte.
-HEIC is deliberately absent (see below).
+HEIC is read only, through the browser's or operating system's own decoder;
+Airgap ships no HEVC code (see below).
 
 <p align="center">
   <img src="docs/screenshots/converted-light.png" alt="Airgap after converting a JPEG: the source facts, the live quality preview, the transform controls, the loss list, the verification result and the heat map of changed pixels" width="720" />
@@ -649,13 +650,51 @@ in Node and decodes every entry with pngjs against its source.
   Airgap registers as a handler for the six image types, so the OS can open a
   file with it; the file arrives in memory exactly like a drop.
 
-## HEIC
+## HEIC (read only, through the platform's own decoder)
 
-Left out. `libheif-js` can decode HEIC without cross-origin isolation, but
-the package ships no LICENSE file, so its LGPL-3 obligations cannot be met
-against absent terms, and HEVC decoding is patent-pool licensed. The decision
-and the evidence are in `docs/phase3-codec-survey.md`. It may return later as
-an explicit opt-in module.
+HEIC is what iPhones save, and most people want it converted to JPEG, PNG or
+AVIF. Airgap reads HEIC but ships no HEVC code, so the legal position does not
+change. HEVC is covered by patent pools that license per implementation, and
+the usual open-source decoder (libde265) is LGPL-3.0. The Phase 3 survey
+(`docs/phase3-codec-survey.md`) excluded bundling it for those reasons, and
+that still holds. Instead, every HEIC pixel is decoded by the licensed
+decoder that comes with the user's browser or operating system. Two paths
+are tried in order:
+
+1. **The browser's image decoder.** Safari decodes HEIC itself, and Apple's
+   decoder does the work.
+2. **WebCodecs, the platform's HEVC video decoder.** A HEIC file is a HEIF
+   container, close to AVIF, holding HEVC-coded tiles. Airgap reads the
+   container itself (`src/codecs/heif.ts`): primary item, per-item
+   properties, item locations, tile grids, the alpha plane, rotation and
+   mirroring. It hands each coded tile to the browser's `VideoDecoder`. It
+   then converts YUV to RGB itself, using the matrix from the file's `colr`
+   property and the range the decoder reports for its buffer. Chrome on
+   macOS hands back video-range buffers for full-range images, so trusting
+   either source alone gives errors of about 30 levels.
+
+Where it works, measured: Safari, by both paths, and Google Chrome where the
+system provides HEVC decoding (macOS, and Windows with HEVC support), by
+WebCodecs. Open-source Chromium and Firefox have neither, and Airgap says so
+plainly when a HEIC file is dropped there.
+
+What it does not claim:
+- **Never encoded.** HEIC is not offered as a target.
+- **Never called lossless.** There is no independent HEVC decoder in the
+  browser to cross-check against, so every HEIC source carries the
+  `decoder-unverified` pixel loss with that reason. Decoding is 8-bit, and
+  alpha goes through a canvas, so it is not exact either.
+
+Evidence: fixtures written by Apple's own encoder (macOS `sips`), including a
+2×3 tile grid and an image with an alpha plane. Each decode is compared with
+Apple's own decode of the same file. Airgap's WebCodecs path is within 4
+levels (mean 0.4 in Chrome, 1.2 in Safari), and Safari's image decoder is
+within 8, because it upsamples chroma differently. The grid's tiles land
+where they belong. Engines without a decoder skip those tests with the
+reason, and the e2e test checks the refusal message there.
+
+This is a practical engineering position, not legal advice: relying on the
+platform's licensed decoder is the standard way web apps handle HEIC.
 
 ## Codec selection
 
@@ -738,6 +777,8 @@ src/codecs/wasm/*.ts       @jsquash-backed PNG (decode), JPEG, WebP; libjxl.ts /
 src/codecs/tiff.ts         utif decode + own baseline writer
 src/codecs/qoi.ts          own QOI encoder/decoder from the specification
 src/codecs/apng.ts         own APNG reader (compositing per the spec) and writer
+src/codecs/heif.ts         HEIF container reader (items, properties, grids, alpha, iloc)
+src/codecs/heic.ts         HEIC via the platform decoder only: image decoder, then WebCodecs
 src/codecs/webp-anim.ts    own animated WebP container reader/writer (libwebp-exact compositing)
 src/inspect.ts             pure header parsing for all six formats, incl. CICP colour descriptions
 src/capabilities.ts        pure: source + target + probed pipeline -> list of losses

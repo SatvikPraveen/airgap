@@ -192,3 +192,12 @@ closed-source project.
   `EXIF`, drop the GPSInfo tag from IFD0, rewrite Orientation, copy ICC into
   APP2 / `iCCP` (zlib via `CompressionStream`) / `ICCP`) are container
   plumbing, not codec work, and are fully unit-testable on parsed tags.
+
+
+## Addendum (2026-10-11): HEIC through the platform decoder
+
+The exclusion of bundled HEVC decoding stands. HEIC is now read without
+shipping any HEVC code: through the browser's image decoder (Safari) or
+through WebCodecs' platform HEVC decoder (Chrome and Safari where the
+system provides one), with Airgap parsing the HEIF container itself. See
+"HEIC" in the README.
