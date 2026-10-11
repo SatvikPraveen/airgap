@@ -145,6 +145,22 @@ test('JPEG XL source: rgba-partial.jxl -> PNG reads exactly through jxl-oxide; n
   assertPixelIdentical(decodePngNode(fixture('rgba-partial.png')), decodePngNode(bytes));
 });
 
+test('JPEG XL source with EXIF and XMP boxes: preserve carries both into PNG; strip-gps removes only GPS', async ({ page }) => {
+  await pickFixture(page, 'exif-gps.jxl');
+  await expect(page.locator('[data-fact="exif"]')).toContainText('GPS');
+  await expect(page.locator('[data-fact="xmp"]')).toHaveText('present');
+  await selectTarget(page, 'png');
+  await page.getByTestId('meta-preserve').check();
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const kept = await convertAndDownload(page);
+  expect(pngChunkTypes(kept.bytes)).toEqual(expect.arrayContaining(['eXIf', 'iTXt']));
+  await expect(page.getByTestId('metadata-check')).toContainText('EXIF kept, GPS kept, ICC not in source, XMP kept');
+  await page.getByTestId('meta-strip-gps').check();
+  await expect(page.locator('[data-loss="gps"]')).toBeVisible();
+  await convertAndDownload(page);
+  await expect(page.getByTestId('metadata-check')).toContainText('EXIF kept, GPS removed');
+});
+
 test('JPEG XL lossy still converts and is reported lossy', async ({ page }) => {
   await pickFixture(page, 'rgb8.png');
   await selectTarget(page, 'jxl-lossy');

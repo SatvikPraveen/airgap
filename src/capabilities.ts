@@ -251,7 +251,13 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
     });
   }
 
-  if (m.hasExif) {
+  if (m.hasExif && m.exifOpaque && target.metadataMode !== 'strip-all') {
+    losses.push({
+      kind: 'exif',
+      severity: 'metadata',
+      message: 'EXIF metadata will be removed: the source stores it Brotli-compressed (a JPEG XL brob box), which Airgap cannot read, so it can be neither carried nor cleaned. Whether it holds a GPS location is unknown.',
+    });
+  } else if (m.hasExif) {
     if (target.metadataMode === 'strip-all') {
       losses.push({
         kind: 'exif',
@@ -300,7 +306,13 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
     }
   }
 
-  if (m.hasXmp) {
+  if (m.hasXmp && m.xmpOpaque && target.metadataMode === 'preserve') {
+    losses.push({
+      kind: 'xmp',
+      severity: 'metadata',
+      message: 'XMP metadata will be removed: the source stores it Brotli-compressed (a JPEG XL brob box), which Airgap cannot read or carry.',
+    });
+  } else if (m.hasXmp) {
     if (target.metadataMode === 'strip-all') {
       losses.push({ kind: 'xmp', severity: 'metadata', message: 'XMP metadata will be removed.' });
     } else if (target.metadataMode === 'strip-gps') {

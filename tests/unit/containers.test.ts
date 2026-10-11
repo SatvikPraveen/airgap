@@ -93,3 +93,40 @@ describe('injectMetadata round trips', () => {
     expect(inspect(out).metadata.hasAlpha).toBe(true);
   });
 });
+
+describe('JPEG XL container metadata', () => {
+  it('reads EXIF (after the 4-byte TIFF offset) and XMP from Exif / xml boxes', () => {
+    const jxl = fixture('exif-gps.jxl');
+    const h = inspect(jxl);
+    expect(h.format).toBe('jxl');
+    expect(h.metadata).toMatchObject({ hasExif: true, hasGps: true, hasXmp: true });
+    expect(h.metadata.exifOpaque).toBeUndefined();
+    const m = extractMetadata(jxl, 'jxl');
+    // The fixture script wrote the same TIFF into exif-gps.jpg's APP1: byte-identical payloads.
+    expect(Array.from(m.exif!)).toEqual(Array.from(extractMetadata(fixture('exif-gps.jpg'), 'jpeg').exif!));
+    expect(new TextDecoder().decode(m.xmp!)).toContain('CreatorTool="Airgap fixtures"');
+  });
+  it('a bare codestream has no boxes and no payloads', () => {
+    expect(extractMetadata(fixture('rgba-partial.jxl'), 'jxl')).toEqual({});
+  });
+  it('Brotli-compressed (brob) Exif / xml boxes are flagged opaque, never ignored', () => {
+    const box = (type: string, payload: number[]) => {
+      const b = new Uint8Array(8 + payload.length);
+      new DataView(b.buffer).setUint32(0, b.length);
+      b.set(new TextEncoder().encode(type), 4);
+      b.set(payload, 8);
+      return Array.from(b);
+    };
+    const codestream = Array.from(fixture('rgba-partial.jxl'));
+    const file = new Uint8Array([
+      ...[0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a],
+      ...box('ftyp', [0x6a, 0x78, 0x6c, 0x20, 0, 0, 0, 0, 0x6a, 0x78, 0x6c, 0x20]),
+      ...box('brob', [...new TextEncoder().encode('Exif'), 1, 2, 3, 4]),
+      ...box('brob', [...new TextEncoder().encode('xml '), 5, 6]),
+      ...box('jxlc', codestream),
+    ]);
+    const h = inspect(file);
+    expect(h.metadata).toMatchObject({ hasExif: true, exifOpaque: true, hasXmp: true, xmpOpaque: true, hasGps: false });
+    expect(extractMetadata(file, 'jxl')).toEqual({});
+  });
+});

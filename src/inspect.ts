@@ -576,6 +576,8 @@ function inspectJxl(b: Uint8Array): HeaderInfo {
   let hasExif = false;
   let hasGps = false;
   let hasXmp = false;
+  let exifOpaque = false;
+  let xmpOpaque = false;
   if (!(b[0] === 0xff && b[1] === 0x0a)) {
     for (const box of boxes(b, 0, b.length)) {
       if (box.type === 'Exif') {
@@ -583,6 +585,12 @@ function inspectJxl(b: Uint8Array): HeaderInfo {
         const skip = u32be(b, box.start);
         hasGps = parseTiff(b.subarray(box.start + 4 + skip, box.end)).hasGps;
       } else if (box.type === 'xml ') hasXmp = true;
+      else if (box.type === 'brob' && box.end - box.start >= 4) {
+        // Brotli-compressed box: the first four bytes name the box it holds.
+        const inner = ascii(b, box.start, 4);
+        if (inner === 'Exif') (hasExif = true), (exifOpaque = true);
+        else if (inner === 'xml ') (hasXmp = true), (xmpOpaque = true);
+      }
     }
   }
   const cs = jxlCodestream(b);
@@ -731,7 +739,9 @@ function inspectJxl(b: Uint8Array): HeaderInfo {
   }
   const metadata = baseMeta({ bitDepth, hasAlpha, hasExif, hasGps, hasIcc, hasXmp, isAnimated });
   if (uncertain) metadata.bitDepthUncertain = true;
-  // libjxl applies the orientation itself while decoding, so we record it only for display.
+  if (exifOpaque) metadata.exifOpaque = true;
+  if (xmpOpaque) metadata.xmpOpaque = true;
+  // The JXL decoders apply the orientation themselves, so we record it only for display.
   if (orientation !== undefined && orientation !== 1) metadata.orientation = orientation;
   if (colorDescription) metadata.colorDescription = colorDescription;
   return { format: 'jxl', width, height, metadata };

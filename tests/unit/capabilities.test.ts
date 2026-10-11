@@ -285,3 +285,24 @@ describe('geometric edits (crop, rotate/mirror, resize)', () => {
     expect(noThumb[1]!.message).not.toMatch(/thumbnail/);
   });
 });
+
+describe('unreadable (Brotli-compressed) JPEG XL metadata', () => {
+  const opaque = src('jxl', { hasExif: true, exifOpaque: true, hasXmp: true, xmpOpaque: true });
+  const t = (metadataMode: TargetSpec['metadataMode']): TargetSpec => ({ format: 'png', lossless: true, metadataMode, iccMode: 'strip' });
+  const p = { decoder: caps(), encoder: caps() };
+  it('preserve and strip-gps cannot carry it: listed as removed, location status unknown', () => {
+    for (const mode of ['preserve', 'strip-gps'] as const) {
+      const l = computeLosses(opaque, t(mode), p);
+      const exif = l.find((x) => x.kind === 'exif')!;
+      expect(exif.message, mode).toMatch(/Brotli-compressed/);
+      expect(exif.message, mode).toMatch(/unknown/);
+      expect(l.find((x) => x.kind === 'xmp'), mode).toBeDefined();
+      expect(l.find((x) => x.kind === 'gps'), mode).toBeUndefined();
+    }
+  });
+  it('strip-all lists the ordinary removal', () => {
+    const l = computeLosses(opaque, t('strip-all'), p);
+    expect(l.map((x) => x.kind)).toEqual(['exif', 'xmp']);
+    expect(l[0]!.message).not.toMatch(/Brotli/);
+  });
+});

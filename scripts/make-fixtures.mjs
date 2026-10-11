@@ -23,6 +23,7 @@
  *   rgba-partial.webp   64x48  lossless WebP (VP8L) with alpha
  *   rgba-partial.avif   64x48  lossless AVIF with alpha
  *   rgba-partial.jxl    64x48  lossless JPEG XL with alpha
+ *   exif-gps.jxl        64x48  the same codestream in a JXL container with Exif (GPS) and xml boxes
  */
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -596,6 +597,25 @@ try {
   const opts = { ...meta.defaultOptions, lossless: true, quality: 100, lossyModular: false, lossyPalette: false };
   const bytes = enc.encode(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.length), P.RGBA_PARTIAL.width, P.RGBA_PARTIAL.height, opts);
   write('rgba-partial.jxl', bytes);
+  // ISOBMFF container assembled by hand: signature, ftyp, Exif (4-byte TIFF offset + TIFF), xml, jxlc.
+  const box = (type, payload) => {
+    const b = new Uint8Array(8 + payload.length);
+    new DataView(b.buffer).setUint32(0, b.length);
+    b.set(new TextEncoder().encode(type), 4);
+    b.set(payload, 8);
+    return b;
+  };
+  const cat = (...parts) => {
+    const o = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let k = 0;
+    for (const p of parts) (o.set(p, k), (k += p.length));
+    return o;
+  };
+  const sig = new Uint8Array([0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a]);
+  const ftyp = box('ftyp', new Uint8Array([0x6a, 0x78, 0x6c, 0x20, 0, 0, 0, 0, 0x6a, 0x78, 0x6c, 0x20]));
+  const exif = box('Exif', cat(new Uint8Array(4), buildTiff(exifEntries({ orientation: 1 }))));
+  const xmp = box('xml ', new TextEncoder().encode('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="Airgap fixtures"/></rdf:RDF></x:xmpmeta>'));
+  write('exif-gps.jxl', cat(sig, ftyp, exif, xmp, box('jxlc', new Uint8Array(bytes))));
 } catch (err) {
   console.warn('JXL fixture skipped:', err.message);
 }

@@ -305,6 +305,14 @@ JPEG XL cannot carry any of them through the codecs in use; choosing
 "preserve" for those targets lists the loss and the post-conversion check
 reports "removed".
 
+As sources, JPEG XL files have their `Exif` and `xml ` boxes read like any
+other container, so EXIF and XMP from a JPEG XL can be inspected, cleaned and
+carried into a target that holds them. A box stored Brotli-compressed
+(`brob`) cannot be read without a Brotli decoder, which Airgap does not ship
+for metadata. It is still detected: the loss list says the block will be
+removed in every mode and that whether it holds a location is unknown.
+Before this, such metadata was not reported at all.
+
 JPEG XL sources are read by jxl-oxide, which keeps the stored values and
 returns the embedded ICC profile, so the ICC modes apply to them like any
 other format. Only the libjxl fallback converts to sRGB itself, and that is

@@ -71,6 +71,12 @@ export interface ImageMetadata {
   hasThumbnail?: boolean;
   hasIcc: boolean;
   hasXmp: boolean;
+  /**
+   * EXIF / XMP is present but its bytes cannot be read (a Brotli-compressed JPEG XL `brob`
+   * box): it can be neither carried nor cleaned, and whether it holds a location is unknown.
+   */
+  exifOpaque?: boolean;
+  xmpOpaque?: boolean;
   /** Parsed ICC facts, when the profile bytes were extracted. */
   iccKind?: IccKind;
   iccDescription?: string;

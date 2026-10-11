@@ -30,9 +30,45 @@ export function extractMetadata(bytes: Uint8Array, format: ImageFormat): Metadat
       return extractPng(bytes);
     case 'webp':
       return extractWebp(bytes);
+    case 'jxl':
+      return extractJxl(bytes);
     default:
       return {};
   }
+}
+
+// ------------------------------------------------------------------- JPEG XL
+
+/**
+ * EXIF and XMP from a JPEG XL container's `Exif` and `xml ` boxes. The Exif box starts with a
+ * 4-byte big-endian offset to the TIFF header. Brotli-compressed (`brob`) boxes cannot be read
+ * here; inspect() flags them as opaque so the loss list says so. A bare codestream has neither.
+ * (The ICC profile lives inside the codestream; the decoder returns it.)
+ */
+function extractJxl(b: Uint8Array): MetadataPayloads {
+  const out: MetadataPayloads = {};
+  if (b.length < 12 || (b[0] === 0xff && b[1] === 0x0a)) return out;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let off = 0;
+  while (off + 8 <= b.length) {
+    let size = dv.getUint32(off);
+    const type = String.fromCharCode(b[off + 4]!, b[off + 5]!, b[off + 6]!, b[off + 7]!);
+    let header = 8;
+    if (size === 1) {
+      if (off + 16 > b.length) break;
+      size = dv.getUint32(off + 12);
+      header = 16;
+    } else if (size === 0) size = b.length - off;
+    if (size < header || off + size > b.length) break;
+    const start = off + header;
+    const end = off + size;
+    if (type === 'Exif' && end - start >= 4 && !out.exif) {
+      const skip = dv.getUint32(start);
+      if (start + 4 + skip < end) out.exif = b.slice(start + 4 + skip, end);
+    } else if (type === 'xml ' && !out.xmp) out.xmp = b.slice(start, end);
+    off += size;
+  }
+  return out;
 }
 
 /** Returns new bytes with existing EXIF/ICC/XMP removed and the given payloads inserted. */

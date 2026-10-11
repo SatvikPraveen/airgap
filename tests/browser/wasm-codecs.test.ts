@@ -180,6 +180,14 @@ describe('decoding the independently written fixtures', () => {
     expect(img.metadata.hasAlpha).toBe(true);
     expect(img.metadata.orientationApplied).toBe(true);
   });
+  it('jxl-oxide reads a JXL container: pixels from jxlc, EXIF and XMP from their boxes', async () => {
+    const img = await (await codecs['jxl-oxide']!).decode(await fixtureBytes('exif-gps.jxl'));
+    expect(firstMismatch(img.pixels.data, rgba8().data)).toBeNull();
+    expect(img.metadata.hasExif).toBe(true);
+    expect(img.metadata.hasGps).toBe(true);
+    expect(img.metadata.exif?.length).toBeGreaterThan(0);
+    expect(new TextDecoder().decode(img.metadata.xmp)).toContain('Airgap fixtures');
+  });
   it('webp/avif: the lossless fixtures decode to the exact pattern; jxl is within 1', async () => {
     for (const [name, file] of [['webp', 'rgba-partial.webp'], ['avif', 'rgba-partial.avif']] as const) {
       const img = await (await codecs[name]!).decode(await fixtureBytes(file));
