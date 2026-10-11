@@ -3,8 +3,12 @@
  * All the "what will be lost" logic lives in src/capabilities.ts; this file
  * only presents it. Codecs are never named here: only capability fields.
  */
+import { aggregateLosses, outputFilename } from '../batch';
 import { computeLosses, isPixelLossless, needsFlatten, type IccMode, type Loss, type MetadataMode, type TargetSpec } from '../capabilities';
-import { EXTENSION, type CodecCapabilities, type ImageFormat } from '../codecs/types';
+import type { CodecCapabilities, ImageFormat } from '../codecs/types';
+import type { SourceInfo } from '../protocol';
+import { uniqueNames, writeZip, zipSize, ZIP_MAX_BYTES } from '../zip';
+import { renderBatchLosses, renderBatchQueue, renderBatchResult } from './batchPanel';
 import { parseHexColor } from '../flatten';
 import { clear, h } from './dom';
 import { createDropzone } from './dropzone';
@@ -12,7 +16,7 @@ import { renderLosses } from './lossPanel';
 import { renderMetadataPanel } from './metadataPanel';
 import { renderResult } from './resultPanel';
 import { renderSource } from './sourcePanel';
-import { initialState, TARGET_ORDER, TARGETS, type AppState, type TargetKey } from './state';
+import { initialState, TARGET_ORDER, TARGETS, type AppState, type BatchItem, type TargetKey } from './state';
 import { inspect } from '../inspect';
 import { previewOnDemand, sizeRefusal, sizeWarning } from '../limits';
 import { createPreviewScheduler } from './preview';
@@ -39,6 +43,8 @@ function buildLink(): HTMLElement {
 export interface AppHandle {
   /** Load a file as if it had been dropped (used by the OS file-handler launch queue). */
   loadFile(file: File): Promise<void>;
+  /** Several files form a batch; one is the single-file flow. */
+  loadFiles(files: File[]): Promise<void>;
 }
 
 export function mountApp(root: HTMLElement): AppHandle {
@@ -90,7 +96,7 @@ export function mountApp(root: HTMLElement): AppHandle {
   // ---- static skeleton ---------------------------------------------------
 
   const errorBox = h('div', { class: 'error', role: 'alert', 'data-testid': 'error', hidden: true });
-  const dropzone = createDropzone((f) => void loadFile(f));
+  const dropzone = createDropzone((files) => void loadFiles(files));
   const sourceHost = h('div', { 'data-testid': 'source-panel' });
   const metadataHost = h('div');
   const targetSelect = h('select', { 'data-testid': 'target', 'aria-label': 'Target format' });
@@ -292,13 +298,17 @@ export function mountApp(root: HTMLElement): AppHandle {
     state.background = background.value;
     render();
   });
-  convertBtn.addEventListener('click', () => void runConversion());
+  convertBtn.addEventListener('click', () => void (state.batch ? runBatch() : runConversion()));
   cancelBtn.addEventListener('click', () => cancelWork());
 
   // ---- derived -------------------------------------------------------------
 
   const encoderCaps = (format: ImageFormat): CodecCapabilities | undefined => state.caps[format]?.encode?.capabilities;
   const decoderCaps = (): CodecCapabilities | undefined => state.source?.info.decoder.capabilities;
+  /** Readable files of the batch (their facts are known), or an empty list outside batch mode. */
+  const batchInfos = (): SourceInfo[] => (state.batch ? state.batch.items.filter((it) => it.info).map((it) => it.info!) : []);
+  /** Every source whose facts drive the controls: the single source, or each readable batch file. */
+  const allInfos = (): SourceInfo[] => (state.source ? [state.source.info] : batchInfos());
 
   function targetSpec(key: TargetKey): TargetSpec {
     const t = TARGETS[key];
@@ -310,23 +320,43 @@ export function mountApp(root: HTMLElement): AppHandle {
     const src = state.source;
     const enc = encoderCaps(TARGETS[state.target].format);
     if (!src || !enc) return null;
-    const flatten = needsFlatten({ format: src.info.format, metadata: src.info.metadata }, enc);
-    return {
-      target: targetSpec(state.target),
-      quality: state.quality / 100,
-      ...(flatten ? { background: parseHexColor(state.background) } : {}),
-    };
+    return planFor(src.info, enc);
   }
 
   /** Identity of a preview: the source and every setting that changes the output bytes. */
   const previewKey = (id: number, plan: ConversionPlan): string => `${id}|${state.quality}|${JSON.stringify(plan)}`;
   const previewQualityOf = (key: string): number => Number(key.split('|')[1]);
 
-  function targetLosses(key: TargetKey): Loss[] | null {
-    const dec = decoderCaps();
+  function lossesFor(info: SourceInfo, key: TargetKey): Loss[] | null {
     const enc = encoderCaps(TARGETS[key].format);
-    if (!state.source || !dec || !enc) return null;
-    return computeLosses({ format: state.source.info.format, metadata: state.source.info.metadata }, targetSpec(key), { decoder: dec, encoder: enc });
+    if (!enc) return null;
+    return computeLosses({ format: info.format, metadata: info.metadata }, targetSpec(key), { decoder: info.decoder.capabilities, encoder: enc });
+  }
+
+  function targetLosses(key: TargetKey): Loss[] | null {
+    return state.source ? lossesFor(state.source.info, key) : null;
+  }
+
+  /** Per readable batch file, in queue order; null until the encoder is probed. */
+  function batchLossLists(key: TargetKey): Loss[][] | null {
+    const infos = batchInfos();
+    const lists: Loss[][] = [];
+    for (const info of infos) {
+      const l = lossesFor(info, key);
+      if (!l) return null;
+      lists.push(l);
+    }
+    return lists;
+  }
+
+  /** The plan for one file (single or batch) under the current settings. */
+  function planFor(info: SourceInfo, enc: CodecCapabilities): ConversionPlan {
+    const flatten = needsFlatten({ format: info.format, metadata: info.metadata }, enc);
+    return {
+      target: targetSpec(state.target),
+      quality: state.quality / 100,
+      ...(flatten ? { background: parseHexColor(state.background) } : {}),
+    };
   }
 
   /** Why a target option is unavailable, or null. Reads probed capability fields only. */
@@ -341,8 +371,14 @@ export function mountApp(root: HTMLElement): AppHandle {
     if (!enc.encode) return 'no encoder in this browser';
     if (t.lossless && !enc.lossless) return 'lossless not verified in this browser';
     if (state.losslessOnly) {
-      const losses = targetLosses(key);
-      if (losses ? !isPixelLossless(losses) : !t.lossless) return 'excluded by lossless-only';
+      if (state.batch) {
+        // One file that would lose pixels excludes the target for the whole batch: the panel says which.
+        const lists = batchLossLists(key);
+        if (lists ? lists.some((l) => !isPixelLossless(l)) : !t.lossless) return 'excluded by lossless-only';
+      } else {
+        const losses = targetLosses(key);
+        if (losses ? !isPixelLossless(losses) : !t.lossless) return 'excluded by lossless-only';
+      }
     }
     return null;
   }
@@ -409,27 +445,34 @@ export function mountApp(root: HTMLElement): AppHandle {
     renderPreviewSection(lossyTarget);
 
     const src = state.source;
-    const flatten = !!(src && enc && needsFlatten({ format: src.info.format, metadata: src.info.metadata }, enc));
+    const infos = allInfos();
+    const flatten = !!enc && infos.some((info) => needsFlatten({ format: info.format, metadata: info.metadata }, enc));
     backgroundField.hidden = !flatten;
     background.value = state.background;
     backgroundHex.textContent = state.background;
 
-    const m = src?.info.metadata;
-    metadataField.hidden = !(m && (m.hasExif || m.hasXmp));
+    const metas = infos.map((info) => info.metadata);
+    metadataField.hidden = !metas.some((m) => m.hasExif || m.hasXmp);
     metadataRadios.reset();
     metadataRadios.sync();
-    const dec = decoderCaps();
-    iccField.hidden = !(m && m.hasIcc && dec && !dec.decodeAppliesIcc);
+    const iccSources = infos.filter((info) => info.metadata.hasIcc && !info.decoder.capabilities.decodeAppliesIcc);
+    iccField.hidden = iccSources.length === 0;
     iccRadios.reset();
     const iccDisabled: Partial<Record<IccMode, string>> = {};
-    if (m && m.hasIcc && m.iccKind !== 'matrix') {
-      iccDisabled['convert-srgb'] = `Not available: this is a ${m.iccKind ?? 'unknown'} profile. Airgap converts matrix/TRC profiles only and will not approximate a LUT-based profile.`;
+    const nonMatrix = iccSources.find((info) => info.metadata.iccKind !== 'matrix');
+    if (nonMatrix) {
+      const kind = nonMatrix.metadata.iccKind ?? 'unknown';
+      const who = state.batch?.items.find((it) => it.info === nonMatrix)?.file.name;
+      iccDisabled['convert-srgb'] = state.batch
+        ? `Not available: ${who ?? 'a file in the batch'} has a ${kind} profile. Airgap converts matrix/TRC profiles only and will not approximate a LUT-based profile.`
+        : `Not available: this is a ${kind} profile. Airgap converts matrix/TRC profiles only and will not approximate a LUT-based profile.`;
       if (state.iccMode === 'convert-srgb') state.iccMode = 'strip';
     }
     iccRadios.sync(iccDisabled);
 
     clear(sourceHost);
     if (src) sourceHost.append(renderSource(src));
+    else if (state.batch) sourceHost.append(renderBatchQueue(state.batch, { onRemove: removeFromBatch }));
     clear(metadataHost);
     if (src) {
       const panel = renderMetadataPanel({
@@ -443,24 +486,41 @@ export function mountApp(root: HTMLElement): AppHandle {
     }
 
     clear(lossHost);
+    const batchLists = state.batch ? batchLossLists(state.target) : null;
     const losses = targetLosses(state.target);
-    if (losses) lossHost.append(renderLosses(losses));
-    else if (src) lossHost.append(h('p', { class: 'note' }, 'Waiting for the target encoder to be verified in this browser…'));
+    if (state.batch && batchLists) lossHost.append(renderBatchLosses(aggregateLosses(batchLists), batchLists.length));
+    else if (losses) lossHost.append(renderLosses(losses));
+    else if (src || state.batch) lossHost.append(h('p', { class: 'note' }, 'Waiting for the target encoder to be verified in this browser…'));
     else lossHost.append(h('p', { class: 'note' }, 'Load an image to see what the selected conversion would discard.'));
 
     const targetAvailable = targetDisabledReason(state.target) === null && !!enc;
-    if (src && enc && targetDisabledReason(state.target) !== null) {
+    if (infos.length && enc && targetDisabledReason(state.target) !== null) {
       lossHost.append(
-        h('p', { class: 'note', 'data-testid': 'no-target' }, 'No verified target can convert this source without changing visible pixel values. Turn off "Lossless only" to convert anyway; the list above stays honest about what goes.'),
+        h('p', { class: 'note', 'data-testid': 'no-target' }, state.batch ? 'No verified target can convert every file in this batch without changing visible pixel values. Turn off "Lossless only" to convert anyway; the list above stays honest about what goes, and for how many files.' : 'No verified target can convert this source without changing visible pixel values. Turn off "Lossless only" to convert anyway; the list above stays honest about what goes.'),
       );
     }
-    convertBtn.disabled = !state.ready || !src || state.busy !== 'idle' || !targetAvailable;
+    const readable = batchInfos().length;
+    convertBtn.textContent = state.batch ? `Convert ${readable} file${readable === 1 ? '' : 's'}` : 'Convert';
+    convertBtn.disabled = !state.ready || (!src && readable === 0) || state.busy !== 'idle' || !targetAvailable;
     cancelBtn.hidden = state.busy === 'idle';
-    status.textContent = state.busy === 'loading' ? 'Decoding…' : state.busy === 'converting' ? 'Converting and verifying…' : state.ready ? '' : 'Starting the conversion worker…';
+    status.textContent =
+      state.busy === 'loading'
+        ? state.batch
+          ? 'Reading each file…'
+          : 'Decoding…'
+        : state.busy === 'converting'
+          ? state.batch
+            ? `Converting and verifying file ${state.batch.items.filter((it) => it.status === 'done' || it.status === 'converting').length} of ${readable}…`
+            : 'Converting and verifying…'
+          : state.ready
+            ? ''
+            : 'Starting the conversion worker…';
 
     clear(resultHost);
-    resultSection.hidden = !state.result;
+    const batchDone = !!state.batch && state.batch.items.some((it) => it.output);
+    resultSection.hidden = !state.result && !batchDone;
     if (state.result) resultHost.append(renderResult(state.result));
+    else if (state.batch && batchDone) resultHost.append(renderBatchResult(state.batch));
   }
 
   /**
@@ -516,6 +576,184 @@ export function mountApp(root: HTMLElement): AppHandle {
     state.result = null;
   }
 
+  async function loadFiles(files: File[]): Promise<void> {
+    if (files.length === 1) {
+      discardBatch();
+      await loadFile(files[0]!);
+    } else if (files.length > 1) await startBatch(files);
+  }
+
+  function discardBatchOutputs(): void {
+    const b = state.batch;
+    if (!b) return;
+    for (const it of b.items) {
+      if (it.output) URL.revokeObjectURL(it.output.url);
+      delete it.output;
+    }
+    if (b.zip) URL.revokeObjectURL(b.zip.url);
+    b.zip = null;
+    b.zipError = null;
+  }
+
+  function discardBatch(): void {
+    discardBatchOutputs();
+    state.batch = null;
+  }
+
+  function discardSource(): void {
+    if (state.source) {
+      worker.unload(state.source.id);
+      URL.revokeObjectURL(state.source.previewUrl);
+      state.source = null;
+    }
+  }
+
+  /** Reads every file once (header guard, then a decode in the worker for the facts) and releases it. */
+  async function startBatch(files: File[]): Promise<void> {
+    state.error = null;
+    state.notice = null;
+    state.busy = 'loading';
+    discardResult();
+    previewer.reset();
+    discardPreview();
+    state.previewError = null;
+    discardSource();
+    discardBatch();
+    const items: BatchItem[] = files.map((file) => ({ file, status: 'waiting' }));
+    state.batch = { items, running: false, zip: null, zipError: null };
+    render();
+    try {
+      for (const it of items) {
+        if (state.batch?.items !== items) return; // a new drop replaced this batch
+        it.status = 'reading';
+        render();
+        try {
+          const bytes = await it.file.arrayBuffer();
+          let header: ReturnType<typeof inspect> | null = null;
+          try {
+            header = inspect(new Uint8Array(bytes));
+          } catch {
+            header = null;
+          }
+          if (header) {
+            const refusal = sizeRefusal(header.width, header.height);
+            if (refusal) throw new Error(refusal);
+          }
+          const { id, info } = await worker.load(bytes);
+          worker.unload(id);
+          it.info = info;
+          it.status = 'ready';
+        } catch (err) {
+          if (err instanceof WorkerCancelledError) throw err;
+          it.status = 'error';
+          it.error = (err as Error).message;
+        }
+        render();
+      }
+    } catch (err) {
+      if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;
+    } finally {
+      if (state.batch?.items === items) {
+        for (const it of items) if (it.status === 'waiting' || it.status === 'reading') it.status = 'cancelled';
+        state.busy = 'idle';
+        render();
+      }
+    }
+  }
+
+  function removeFromBatch(index: number): void {
+    const b = state.batch;
+    if (!b || b.running) return;
+    const [it] = b.items.splice(index, 1);
+    if (it?.output) URL.revokeObjectURL(it.output.url);
+    if (b.zip) {
+      URL.revokeObjectURL(b.zip.url);
+      b.zip = null;
+    }
+    if (b.items.length === 1 && b.items[0]!.file) {
+      // A batch of one is just a file: back to the single-file flow with its inspector and preview.
+      const file = b.items[0]!.file;
+      discardBatch();
+      void loadFile(file);
+      return;
+    }
+    if (b.items.length === 0) discardBatch();
+    render();
+  }
+
+  /** Converts every readable file in order; completed outputs survive a cancel. */
+  async function runBatch(): Promise<void> {
+    const b = state.batch;
+    const t = TARGETS[state.target];
+    const enc = encoderCaps(t.format);
+    if (!b || !enc) return;
+    state.error = null;
+    state.busy = 'converting';
+    b.running = true;
+    discardBatchOutputs();
+    render();
+    try {
+      for (const it of b.items) {
+        if (!it.info) continue;
+        it.status = 'converting';
+        render();
+        try {
+          const bytes = await it.file.arrayBuffer();
+          const { id, info } = await worker.load(bytes);
+          try {
+            const out = await worker.convert(id, planFor(info, enc));
+            const outBytes = new Uint8Array(out.bytes);
+            it.output = {
+              bytes: outBytes,
+              url: URL.createObjectURL(new Blob([outBytes], { type: out.mime })),
+              filename: outputFilename(it.file.name, t.format),
+              size: outBytes.byteLength,
+              format: t.format,
+              bitDepth: out.bitDepth,
+              encoderId: out.encoderId,
+              verification: out.verification,
+            };
+            it.status = 'done';
+          } finally {
+            worker.unload(id);
+          }
+        } catch (err) {
+          if (err instanceof WorkerCancelledError) {
+            it.status = 'cancelled';
+            throw err;
+          }
+          it.status = 'error';
+          it.error = (err as Error).message;
+        }
+        render();
+      }
+    } catch (err) {
+      if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;
+    } finally {
+      b.running = false;
+      buildZip(b);
+      state.busy = 'idle';
+      render();
+    }
+  }
+
+  /** One stored ZIP of every output, with collision-free names. */
+  function buildZip(b: typeof state.batch & object): void {
+    const done = b.items.filter((it) => it.output);
+    if (done.length === 0) return;
+    const names = uniqueNames(done.map((it) => it.output!.filename));
+    const entries = done.map((it, i) => ({ name: names[i]!, data: it.output!.bytes, mtime: new Date(it.file.lastModified || Date.now()) }));
+    const size = zipSize(entries);
+    if (size > ZIP_MAX_BYTES) {
+      b.zipError = `The outputs total ${(size / 1024 ** 3).toFixed(2)} GB; a ZIP archive without ZIP64 is limited to 4 GB. Download the files individually from the table.`;
+      return;
+    }
+    const zip = writeZip(entries);
+    const stamp = new Date().toISOString().slice(0, 10);
+    b.zip = { url: URL.createObjectURL(new Blob([zip.buffer as ArrayBuffer], { type: 'application/zip' })), filename: `airgap-${t(state.target)}-${stamp}.zip`, size: zip.byteLength, entries: entries.length };
+  }
+  const t = (key: TargetKey): string => TARGETS[key].format;
+
   async function loadFile(file: File): Promise<void> {
     state.error = null;
     state.notice = null;
@@ -542,10 +780,7 @@ export function mountApp(root: HTMLElement): AppHandle {
         state.notice = sizeWarning(header.width, header.height, header.metadata.bitDepth);
       }
       const { id, info } = await worker.load(bytes);
-      if (state.source) {
-        worker.unload(state.source.id);
-        URL.revokeObjectURL(state.source.previewUrl);
-      }
+      discardSource();
       state.source = { id, file, info, previewUrl: URL.createObjectURL(file) };
     } catch (err) {
       if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;
@@ -569,9 +804,7 @@ export function mountApp(root: HTMLElement): AppHandle {
       if (!plan) throw new Error('The target encoder is not ready.');
       const out = await worker.convert(src.id, plan);
       const blob = new Blob([out.bytes], { type: out.mime });
-      const base = src.file.name.replace(/\.[^.]+$/, '') || 'image';
-      const ext = EXTENSION[t.format];
-      const filename = `${base}.${ext}` === src.file.name ? `${base}-converted.${ext}` : `${base}.${ext}`;
+      const filename = outputFilename(src.file.name, t.format);
       state.result = {
         url: URL.createObjectURL(blob),
         size: blob.size,
@@ -628,6 +861,12 @@ export function mountApp(root: HTMLElement): AppHandle {
     render();
     const src = state.source;
     if (src) await loadFile(src.file);
+    // A batch keeps its facts and finished outputs; nothing needs reloading.
+    if (state.batch) {
+      state.batch.running = false;
+      buildZip(state.batch);
+      render();
+    }
   }
 
   // ---- boot ----------------------------------------------------------------------
@@ -645,5 +884,5 @@ export function mountApp(root: HTMLElement): AppHandle {
       render();
     });
 
-  return { loadFile };
+  return { loadFile, loadFiles };
 }

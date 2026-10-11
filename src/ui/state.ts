@@ -75,6 +75,37 @@ export interface PreviewOutput {
   sourceUrl: string;
 }
 
+export type BatchStatus = 'waiting' | 'reading' | 'ready' | 'error' | 'converting' | 'done' | 'cancelled';
+
+export interface BatchOutput {
+  bytes: Uint8Array;
+  url: string;
+  filename: string;
+  size: number;
+  format: ImageFormat;
+  bitDepth: number;
+  encoderId: string;
+  verification: Verification;
+}
+
+export interface BatchItem {
+  file: File;
+  status: BatchStatus;
+  /** Facts read when the file was decoded once up front; the pixels are not kept. */
+  info?: SourceInfo;
+  error?: string;
+  output?: BatchOutput;
+}
+
+export interface BatchState {
+  items: BatchItem[];
+  /** The conversion loop is running (cancel stops it after the current file). */
+  running: boolean;
+  zip: { url: string; filename: string; size: number; entries: number } | null;
+  /** Why no archive could be built (per-file downloads still work). */
+  zipError: string | null;
+}
+
 export interface AppState {
   ready: boolean;
   caps: CapabilityTable;
@@ -82,6 +113,8 @@ export interface AppState {
   ensuring: Set<string>;
   ensureErrors: Partial<Record<ImageFormat, string>>;
   source: LoadedSource | null;
+  /** Two or more files: settings apply to all, outputs go into one archive. Exclusive with `source`. */
+  batch: BatchState | null;
   target: TargetKey;
   losslessOnly: boolean;
   metadataMode: MetadataMode;
@@ -114,6 +147,7 @@ export function initialState(): AppState {
     ensuring: new Set(),
     ensureErrors: {},
     source: null,
+    batch: null,
     target: 'png',
     losslessOnly: false,
     metadataMode: 'strip-all',

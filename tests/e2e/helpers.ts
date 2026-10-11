@@ -25,6 +25,14 @@ export async function pickFixture(page: Page, name: string): Promise<void> {
   await expect(page.getByTestId('source-facts')).toBeVisible({ timeout: 30_000 });
 }
 
+/** Loads several fixtures at once through the picker: the app enters batch mode. */
+export async function pickFixtures(page: Page, names: string[], as: string[] = names): Promise<void> {
+  await page.getByTestId('file-input').setInputFiles(names.map((name, i) => ({ name: as[i]!, mimeType: mimeOf(name), buffer: fixture(name) })));
+  await expect(page.getByTestId('batch-table')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('batch-row')).toHaveCount(names.length);
+  await expect(page.locator('[data-testid="batch-row"]:not([data-status="ready"]):not([data-status="error"])')).toHaveCount(0, { timeout: 60_000 });
+}
+
 /** Loads a fixture by dispatching a real `drop` event carrying a File. */
 export async function dropFixture(page: Page, name: string): Promise<void> {
   const dt = await page.evaluateHandle(

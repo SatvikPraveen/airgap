@@ -1,28 +1,31 @@
 import { h } from './dom';
 
-export function createDropzone(onFile: (file: File) => void): HTMLElement {
-  // Paste from the clipboard (a copied file or image data) loads it like a drop.
+/** One file converts on its own; several form a batch. The app decides; the zone only collects. */
+export function createDropzone(onFiles: (files: File[]) => void): HTMLElement {
+  // Paste from the clipboard (copied files or image data) loads them like a drop.
   document.addEventListener('paste', (e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+    const files: File[] = [];
     for (const item of Array.from(items)) {
       if (item.kind !== 'file') continue;
       const f = item.getAsFile();
-      if (f) {
-        e.preventDefault();
-        onFile(f);
-        return;
-      }
+      if (f) files.push(f);
+    }
+    if (files.length) {
+      e.preventDefault();
+      onFiles(files);
     }
   });
 
   const input = h('input', {
     type: 'file',
+    multiple: true,
     accept: 'image/png,image/jpeg,image/webp,image/avif,image/jxl,image/tiff,.png,.jpg,.jpeg,.webp,.avif,.jxl,.tif,.tiff',
     'data-testid': 'file-input',
     onChange: () => {
-      const f = input.files?.[0];
-      if (f) onFile(f);
+      const files = Array.from(input.files ?? []);
+      if (files.length) onFiles(files);
       input.value = '';
     },
   });
@@ -34,7 +37,7 @@ export function createDropzone(onFile: (file: File) => void): HTMLElement {
       role: 'button',
       tabindex: '0',
       'data-testid': 'dropzone',
-      'aria-label': 'Drop an image here or press Enter to choose a file',
+      'aria-label': 'Drop images here or press Enter to choose files',
       onClick: () => input.click(),
       onKeyDown: (e) => {
         const ke = e as KeyboardEvent;
@@ -56,12 +59,12 @@ export function createDropzone(onFile: (file: File) => void): HTMLElement {
       onDrop: (e) => {
         e.preventDefault();
         zone.classList.remove('is-over');
-        const f = (e as DragEvent).dataTransfer?.files?.[0];
-        if (f) onFile(f);
+        const files = Array.from((e as DragEvent).dataTransfer?.files ?? []);
+        if (files.length) onFiles(files);
       },
     },
-    h('div', { class: 'big' }, 'Drop a PNG, JPEG, WebP, AVIF, JPEG XL or TIFF here'),
-    h('div', {}, 'or click to choose a file, or paste an image from the clipboard. One file at a time in this version.'),
+    h('div', { class: 'big' }, 'Drop PNG, JPEG, WebP, AVIF, JPEG XL or TIFF files here'),
+    h('div', {}, 'or click to choose files, or paste from the clipboard. Several files convert with the same settings into one ZIP archive.'),
     input,
   );
   return zone;

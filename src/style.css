@@ -856,3 +856,63 @@ table.tags tr.fate-removed td:last-child {
 .preview-compare {
   transition: opacity 120ms ease-out;
 }
+
+/* ---- batch mode ---------------------------------------------------------- */
+
+table.queue {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+table.queue th,
+table.queue td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+table.queue th {
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+table.queue td.name {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+table.queue td.actions {
+  white-space: nowrap;
+}
+
+table.queue td.actions .button + .button {
+  margin-left: 6px;
+}
+
+table.queue td.muted {
+  color: var(--muted);
+}
+
+table.queue td.error-text {
+  color: var(--warn-pixels-ink);
+}
+
+table.queue td.verification-cell.identical {
+  color: var(--ok-ink);
+}
+
+table.queue td.verification-cell.differs {
+  color: var(--warn-pixels-ink);
+}
+
+tr[data-status="converting"] td,
+tr[data-status="reading"] td {
+  background: var(--accent-soft);
+}
+
+.batch-result .verification {
+  margin-bottom: 12px;
+}
