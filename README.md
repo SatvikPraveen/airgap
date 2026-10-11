@@ -648,6 +648,10 @@ Two GitHub Actions workflows:
   `actions/deploy-pages`. In the repository settings, Pages must be set to
   "GitHub Actions" as the source.
 
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## Licence
 
 Airgap is released under the [Apache License 2.0](LICENSE), with attribution
