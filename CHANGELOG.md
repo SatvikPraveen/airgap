@@ -4,6 +4,17 @@ Airgap converts images entirely in the browser and states, before and after,
 exactly what each conversion discards. Every entry below is covered by the
 test suites, which run in Chromium, Firefox and WebKit.
 
+## Unreleased
+
+### New
+- **Animated PNG (APNG)** in and out. Every frame, frame delay and the loop
+  count are kept and verified frame by frame. Airgap's own reader composites
+  each frame as the specification says, and its writer stores later frames
+  as changed rectangles. Other targets keep one still image, and the loss
+  list says which one. Checked against a model of the specification and the
+  browsers' own APNG decoders. UPNG.js, a test-only dependency, has two
+  compositing bugs, which are documented and pinned in the tests.
+
 ## 0.2.0 (2026-10-11)
 
 Licence: Airgap's own code is now Apache-2.0 (see `LICENSE` and `NOTICE`).
