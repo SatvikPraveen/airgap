@@ -193,11 +193,15 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
     });
   }
 
-  if (m.isAnimated) {
+  if (m.isAnimated && !(dec.animation && enc.animation)) {
+    const info = m.animationInfo;
+    const n = info ? `${info.frames} frames` : 'multiple frames or pages';
     losses.push({
       kind: 'animation',
       severity: 'pixels',
-      message: 'The source has multiple frames or pages. Only the first will be converted; all others will be dropped.',
+      message: info?.hiddenDefault
+        ? `The source is an animation (${n}) whose still image is not one of its frames. ${label(target.format)} output will hold only that still image, which is what viewers without animation support show; every animation frame is dropped.`
+        : `The source has ${n}. ${enc.animation ? 'The decoder in use cannot read them, so only' : `The ${name} encoder in use writes still images only, so only`} the first will be converted; all others will be dropped.`,
     });
   }
 

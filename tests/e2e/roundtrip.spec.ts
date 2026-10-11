@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
+import * as P from '../fixtures/pattern.mjs';
 import { decode as decodeTiff } from 'tiff';
 import {
   assertPixelIdentical,
+  decodeApngNode,
   decodeJxlNode,
   decodeQoiNode,
   convertAndDownload,
@@ -234,4 +236,29 @@ test('PNG + oxipng: the optimised download decodes identically (pngjs) and the r
   else await expect(line).toContainText('output not used');
   await selectTarget(page, 'webp-lossless');
   await expect(page.getByTestId('optimize-field')).toBeHidden();
+});
+
+test('APNG -> PNG keeps the animation: every frame, delay and the loop count, re-read in Node by UPNG.js', async ({ page }) => {
+  await pickFixture(page, 'apng-ops.png');
+  await expect(page.locator('[data-fact="frames"]')).toHaveText('4 frames · 0.42 s per loop · plays 3 times');
+  await selectTarget(page, 'png');
+  await expect(page.getByTestId('loss-none')).toBeVisible();
+  const { bytes } = await convertAndDownload(page);
+  await expect(page.getByTestId('verification')).toContainText('all 4 frames');
+  await expect(page.getByTestId('verification')).toContainText('every frame delay kept, loop count kept');
+  const got = await decodeApngNode(bytes);
+  const want = P.apngOpsExpectedFrames();
+  expect(got.frames).toHaveLength(4);
+  got.frames.forEach((f, i) => expect(Array.from(f), `frame ${i}`).toEqual(Array.from(want[i]!)));
+  expect(got.delaysMs).toEqual([100, 70, 250, 0]);
+  expect(got.plays).toBe(3);
+});
+
+test('APNG -> WebP: the animation loss names the frame count, and a still image separate from the animation', async ({ page }) => {
+  await pickFixture(page, 'apng-ops.png');
+  await selectTarget(page, 'webp-lossless');
+  await expect(page.locator('[data-loss="animation"]')).toContainText('4 frames');
+  await pickFixture(page, 'apng-hidden.png');
+  await expect(page.locator('[data-fact="frames"]')).toContainText('still image separate from the animation');
+  await expect(page.locator('[data-loss="animation"]')).toContainText('still image is not one of its frames');
 });

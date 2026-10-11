@@ -315,3 +315,21 @@ describe('unreadable (Brotli-compressed) JPEG XL metadata', () => {
     expect(l[0]!.message).not.toMatch(/Brotli/);
   });
 });
+
+describe('animated sources', () => {
+  const anim = (hiddenDefault: boolean) => src('png', { isAnimated: true, sourceLossless: true, animationInfo: { frames: 4, loops: 0, durationMs: 400, hiddenDefault } });
+  const t: TargetSpec = { format: 'png', lossless: true, ...DEFAULT_MODES };
+  it('decoder and encoder both handle animation (probed): nothing lost', () => {
+    expect(computeLosses(anim(false), t, { decoder: caps({ animation: true }), encoder: caps({ animation: true }) })).toEqual([]);
+  });
+  it('an encoder that writes stills only keeps the first frame, and says why', () => {
+    const l = computeLosses(anim(false), t, { decoder: caps({ animation: true }), encoder: caps() });
+    expect(l.map((x) => x.kind)).toEqual(['animation']);
+    expect(l[0]!.message).toMatch(/4 frames.*writes still images only/);
+  });
+  it('a still image that is not a frame is named as what survives', () => {
+    const l = computeLosses(anim(true), { ...t, format: 'webp' }, { decoder: caps({ animation: true }), encoder: caps() });
+    expect(l[0]!.message).toMatch(/still image is not one of its frames/);
+    expect(l[0]!.message).toMatch(/every animation frame is dropped/);
+  });
+});

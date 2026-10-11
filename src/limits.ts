@@ -36,15 +36,17 @@ export function formatMegapixels(mp: number): string {
   return `${mp >= 10 ? mp.toFixed(0) : mp.toFixed(1)} MP`;
 }
 
-export function sizeRefusal(width: number, height: number): string | null {
-  const mp = megapixels(width, height);
+/** `frames`: an animation holds every composited frame in memory, so the limits apply to the total. */
+export function sizeRefusal(width: number, height: number, frames = 1): string | null {
+  const mp = megapixels(width, height) * frames;
   if (mp <= HARD_LIMIT_MEGAPIXELS) return null;
+  if (frames > 1) return `This animation is ${frames} frames of ${width} × ${height} px (${formatMegapixels(mp)} in all). Airgap holds every decoded frame in memory to convert and verify it, and above ${HARD_LIMIT_MEGAPIXELS} MP a browser tab runs out of memory rather than finishing.`;
   return `This image is ${width} × ${height} px (${formatMegapixels(mp)}). Airgap holds decoded pixels in memory three times over to verify its output, and above ${HARD_LIMIT_MEGAPIXELS} MP a browser tab runs out of memory rather than finishing. Downscale it first.`;
 }
 
-export function sizeWarning(width: number, height: number, bitDepth: number): string | null {
-  const mp = megapixels(width, height);
+export function sizeWarning(width: number, height: number, bitDepth: number, frames = 1): string | null {
+  const mp = megapixels(width, height) * frames;
   if (mp > HARD_LIMIT_MEGAPIXELS || mp <= SOFT_LIMIT_MEGAPIXELS) return null;
-  const gb = estimatedPeakBytes(width, height, bitDepth) / 1024 ** 3;
+  const gb = (estimatedPeakBytes(width, height, bitDepth) * frames) / 1024 ** 3;
   return `Large image (${formatMegapixels(mp)}): conversion and verification may take a while and use about ${gb.toFixed(1)} GB of memory. Cancel is available at any time.`;
 }

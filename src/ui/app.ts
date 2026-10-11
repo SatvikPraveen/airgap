@@ -709,7 +709,7 @@ export function mountApp(root: HTMLElement): AppHandle {
             header = null;
           }
           if (header) {
-            const refusal = sizeRefusal(header.width, header.height);
+            const refusal = sizeRefusal(header.width, header.height, header.metadata.animationInfo?.frames ?? 1);
             if (refusal) throw new Error(refusal);
           }
           const { id, info } = await worker.load(bytes);
@@ -848,9 +848,9 @@ export function mountApp(root: HTMLElement): AppHandle {
         header = null;
       }
       if (header) {
-        const refusal = sizeRefusal(header.width, header.height);
+        const refusal = sizeRefusal(header.width, header.height, header.metadata.animationInfo?.frames ?? 1);
         if (refusal) throw new Error(refusal);
-        state.notice = sizeWarning(header.width, header.height, header.metadata.bitDepth);
+        state.notice = sizeWarning(header.width, header.height, header.metadata.bitDepth, header.metadata.animationInfo?.frames ?? 1);
       }
       const { id, info } = await worker.load(bytes);
       const sameFile = state.source?.file === file;

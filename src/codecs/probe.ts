@@ -223,6 +223,28 @@ export async function probeCodec(codec: Codec, independentDecoder?: Codec, refer
       else notes.push(`${depth}-bit round trip exact`);
     }
 
+    // 2b. Animation: three frames with different timing must come back frame for frame, with
+    // their delays and the loop count. Frame 1 changes a corner only (a sub-rectangle frame).
+    if (claimed.animation) {
+      let ok = false;
+      try {
+        const f0 = probeImage(PROBE_SIZE, 8, claimed.alpha, 0x51);
+        const f1 = { ...f0, data: f0.data.slice() } as PixelData;
+        for (let y = 2; y < 7; y++) for (let x = 3; x < 9; x++) f1.data.set([10, 200, 30, claimed.alpha ? 128 : 255], (y * PROBE_SIZE + x) * 4);
+        const f2 = probeImage(PROBE_SIZE, 8, claimed.alpha, 0x52);
+        const anim = { frames: [ { pixels: f0, delayNum: 1, delayDen: 10 }, { pixels: f1, delayNum: 7, delayDen: 100 }, { pixels: f2, delayNum: 0, delayDen: 100 } ], loops: 3, hiddenDefault: false };
+        const bytes = await codec.encode({ ...image(f0, claimed.alpha), animation: anim }, { lossless: true });
+        const dec = await codec.decode(bytes);
+        const a = dec.animation;
+        ok = !!a && a.loops === 3 && a.frames.length === 3 && a.frames.every((f, i) => f.delayNum === anim.frames[i]!.delayNum && f.delayDen === anim.frames[i]!.delayDen && comparePixels(f.pixels, anim.frames[i]!.pixels).identical);
+      } catch (err) {
+        notes.push(`animation probe threw: ${(err as Error).message}`);
+      }
+      check('animation', true, ok);
+      caps.animation = ok;
+      notes.push(ok ? 'animation round trip exact (frames, delays, loop count)' : 'animation NOT demonstrated');
+    }
+
     // 3. Metadata: what goes in must come back out.
     const meta = probeMetadata();
     if (claimed.metadata.exif || claimed.metadata.icc || claimed.metadata.xmp) {

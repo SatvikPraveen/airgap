@@ -137,6 +137,7 @@ under alpha 0, compared with a plain `===` after decoding the output again.
 | WebP lossless, AVIF lossless sources to any lossless target | **yes** | fixture decodes match the generating pattern exactly |
 | PNG 8-bit RGBA to JPEG XL lossless | **yes** | verified by jxl-oxide, which shares no code with the libjxl encoder; the downloaded file is re-decoded in Node too |
 | JPEG XL lossless sources (8-bit) to any lossless target | **yes** | jxl-oxide decodes the lossless fixture to the generating pattern exactly |
+| Animated PNG (APNG) to APNG: every frame, delay and the loop count | **yes** | each composited frame decoded again and compared; downloads re-read by UPNG.js in Node; Chromium's and Firefox's own APNG decoders agree |
 | PNG 8-bit RGBA to QOI, QOI sources to any lossless target | **yes** | Airgap's QOI codec is byte-identical to the reference encoder; downloads re-decoded by the reference decoder in Node |
 | Anything through the canvas fallback with transparency | **no** | canvas is premultiplied: semi-transparent RGB rounds, RGB under alpha 0 is zeroed |
 | Any 16-bit source to WebP or JPEG XL | no, 8-bit output | flagged as `bit-depth` |
@@ -410,6 +411,46 @@ request for. Above 4 megapixels the preview does not run on every move (an
 AVIF encode of a large image takes seconds); a button runs it once for the
 current settings instead.
 
+## Animated PNG (APNG)
+
+An animated PNG converts to an animated PNG with every frame, every frame
+delay and the loop count kept, and the verification checks all of them. The
+code is Airgap's own (`src/codecs/apng.ts`, from the specification); each
+frame's compressed data goes through the same Rust PNG decoder as a still.
+
+- **Reading** composites every frame as a viewer shows it: the canvas starts
+  transparent black, frames blend with SOURCE or OVER, and dispose_op NONE,
+  BACKGROUND or PREVIOUS runs after each frame. A still image stored outside
+  the animation (an IDAT with no frame control before it) is kept apart and
+  reported in the source panel.
+- **Writing** stores frame 0 whole and each later frame as the bounding box
+  of what changed, with dispose NONE and blend SOURCE, so every frame comes
+  back exactly with no blending arithmetic. All frames share one colour
+  layout, so a small animation can still be a palette PNG.
+- **Verification** decodes the output again and compares every composited
+  frame, plus each delay as a duration and the loop count.
+- **Other targets** hold one still image. The loss list gives the frame
+  count, and when the still image is not one of the frames it says that this
+  still image, not the first frame, is what survives.
+- **The memory guard** counts every frame, since each composited frame is
+  held in memory.
+
+Evidence: a fixture written by hand from the specification exercises every
+dispose and blend operation. The tests compare Airgap's frames against a
+model of the specification written out in the test, and against the APNG
+decoders of Chromium and Firefox through `ImageDecoder`. WebKit's
+`ImageDecoder` drops alpha, so that check is skipped there with the reason.
+UPNG.js, a test-only dependency, re-reads Airgap's output in Node. It is not
+used as the oracle for the fixture, because it has two bugs, both pinned in
+`tests/unit/apng.test.ts`:
+- OVER truncates instead of rounding, so even a fully transparent pixel lowers
+  a semi-transparent destination by one.
+- dispose PREVIOUS restores the previous frame as displayed, before that
+  frame's own disposal ran.
+
+Animated WebP and AVIF sequences are not supported yet. They need codec
+builds that read and write animations.
+
 ## QOI
 
 [QOI](https://qoiformat.org/) is a small lossless format: 8-bit RGB or RGBA,
@@ -600,6 +641,7 @@ src/codecs/png-writer.ts   own PNG writer: minimal exact colour type, adaptive f
 src/codecs/wasm/*.ts       @jsquash-backed PNG (decode), JPEG, WebP, AVIF, JPEG XL
 src/codecs/tiff.ts         utif decode + own baseline writer
 src/codecs/qoi.ts          own QOI encoder/decoder from the specification
+src/codecs/apng.ts         own APNG reader (compositing per the spec) and writer
 src/inspect.ts             pure header parsing for all six formats, incl. CICP colour descriptions
 src/capabilities.ts        pure: source + target + probed pipeline -> list of losses
 src/convert.ts             pure orchestration: ICC, bit depth, flatten, metadata, verification, diff mask

@@ -196,3 +196,78 @@ describe('alpha through the whole pipeline', () => {
     expect(out.pixels.data[i + 1]).toBeLessThan(60);
   });
 });
+
+describe('APNG through the real codecs and pipeline', () => {
+  it('the airgap-png probe demonstrates animation (frames, delays, loops)', async () => {
+    const enc = await registry.resolve('png', 'encode');
+    expect(enc.resolved.capabilities.animation, enc.resolved.probe.detail).toBe(true);
+    expect(enc.resolved.probe.detail).toMatch(/animation round trip exact/);
+  });
+  it('apng-ops.png -> PNG keeps every frame, delay and the loop count, verified frame by frame', async () => {
+    const r = await run('apng-ops.png', { format: 'png' });
+    expect(r.src.animation?.frames).toHaveLength(4);
+    expect(r.result.verification.animation).toEqual({ frames: 4, framesIdentical: 4, timingKept: true, loopsKept: true });
+    expect(r.result.verification.identical).toBe(true);
+    const back = await (await registry.resolve('png', 'decode')).codec.decode(r.result.bytes);
+    expect(back.animation?.loops).toBe(3);
+  });
+  it('apng-hidden.png -> PNG keeps the separate still image and both frames', async () => {
+    const r = await run('apng-hidden.png', { format: 'png' });
+    expect(r.result.verification.animation).toMatchObject({ frames: 2, framesIdentical: 2 });
+    const back = await (await registry.resolve('png', 'decode')).codec.decode(r.result.bytes);
+    expect(back.animation?.hiddenDefault).toBe(true);
+    expect(Array.from(back.pixels.data.slice(0, 4))).toEqual([200, 200, 200, 255]);
+  });
+  it('apng-ops.png -> WebP converts the still image only (no animation verification)', async () => {
+    const r = await run('apng-ops.png', { format: 'webp' });
+    expect(r.result.verification.animation).toBeUndefined();
+  });
+  it('a crop applies to every frame', async () => {
+    const bytes = await fixtureBytes('apng-ops.png');
+    const { image, used } = await registry.decode('png', bytes);
+    const enc = await registry.resolve('png', 'encode');
+    const res = await convert(
+      { encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: used.resolved.capabilities, verifier: enc.codec },
+      image,
+      'png',
+      { target: { format: 'png', lossless: true, ...DEFAULT_MODES }, transform: { rotate: 90, flipH: false, flipV: false, crop: { x: 2, y: 2, width: 20, height: 12 } } },
+    );
+    expect([res.width, res.height]).toEqual([12, 20]);
+    expect(res.verification.animation).toEqual({ frames: 4, framesIdentical: 4, timingKept: true, loopsKept: true });
+  });
+  it("the engine's own APNG decoder (ImageDecoder, where available) composites the same frames", async (ctx) => {
+    const ID = (globalThis as unknown as { ImageDecoder?: new (init: object) => { tracks: { ready: Promise<void>; selectedTrack: { frameCount: number } | null }; decode(o: object): Promise<{ image: VideoFrame }> } }).ImageDecoder;
+    if (!ID) return ctx.skip();
+    const bytes = await fixtureBytes('apng-ops.png');
+    const ours = (await registry.decode('png', bytes)).image.animation!;
+    const dec = new ID({ data: bytes, type: 'image/png', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+    await dec.tracks.ready;
+    expect(dec.tracks.selectedTrack?.frameCount).toBe(4);
+    const pixelsOf = async (i: number) => {
+      const { image } = await dec.decode({ frameIndex: i });
+      const c = new OffscreenCanvas(32, 24);
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(image, 0, 0);
+      image.close();
+      return g.getImageData(0, 0, 32, 24).data;
+    };
+    // Some engines' ImageDecoder output drops alpha altogether (measured: WebKit). Frame 0 is a plain
+    // SOURCE frame with a semi-transparent band, so it shows whether alpha survives the display path.
+    const decoded: Uint8ClampedArray[] = [];
+    for (let i = 0; i < 4; i++) decoded.push(await pixelsOf(i)); // each frame once (Firefox refuses repeats)
+    const band = (9 * 32 + 3) * 4 + 3;
+    if (decoded[0]![band] !== 100) return ctx.skip('ImageDecoder frames lose alpha in this engine');
+    for (let i = 0; i < 4; i++) {
+      const d = decoded[i]!;
+      const o = ours.frames[i]!.pixels.data;
+      for (let k = 0; k < d.length; k += 4) {
+        // The canvas stores 8-bit premultiplied colour: alpha and opaque pixels are exact; a
+        // semi-transparent channel can be off by one premultiplied step, about 255 / alpha.
+        expect(d[k + 3], `frame ${i} alpha @${k / 4}`).toBe(o[k + 3]);
+        const a = o[k + 3]!;
+        const tol = a === 255 ? 0 : a === 0 ? 255 : Math.ceil(255 / a);
+        for (let c2 = 0; c2 < 3; c2++) expect(Math.abs(d[k + c2]! - o[k + c2]!), `frame ${i} ch${c2} @${k / 4}`).toBeLessThanOrEqual(tol);
+      }
+    }
+  });
+});

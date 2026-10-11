@@ -99,6 +99,14 @@ export async function decodeJxlNode(bytes: Buffer): Promise<Raster> {
   return decodePngNode(png);
 }
 
+/** APNG frames in Node with UPNG.js (independent). Exact for SOURCE/NONE frames, which is all Airgap writes. */
+export async function decodeApngNode(bytes: Buffer): Promise<{ frames: Uint8Array[]; delaysMs: number[]; plays: number }> {
+  const { createRequire } = await import('node:module');
+  const UPNG = createRequire(import.meta.url)('upng-js') as { decode(b: ArrayBuffer): { frames: { delay: number }[]; tabs: { acTL?: { num_plays: number } } }; toRGBA8(i: unknown): ArrayBuffer[] };
+  const img = UPNG.decode(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+  return { frames: UPNG.toRGBA8(img).map((b) => new Uint8Array(b)), delaysMs: img.frames.map((f) => f.delay), plays: img.tabs.acTL?.num_plays ?? -1 };
+}
+
 /** Decode QOI in Node with the reference implementation (qoi.h via @jsquash/qoi), sharing no code with the app's codec. */
 export async function decodeQoiNode(bytes: Buffer): Promise<Raster> {
   (globalThis as unknown as { ImageData: unknown }).ImageData ??= class {

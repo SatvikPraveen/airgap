@@ -40,7 +40,15 @@ export function renderSource(src: LoadedSource): HTMLElement {
   if (m.orientation !== undefined && m.orientation !== 1) {
     facts.push(['Orientation', `EXIF tag ${m.orientation} (applied to pixels)`]);
   }
-  if (m.isAnimated) facts.push(['Frames', 'multiple (first only)']);
+  if (m.isAnimated) {
+    const a = m.animationInfo;
+    facts.push([
+      'Frames',
+      a
+        ? `${a.frames} frames · ${(a.durationMs / 1000).toFixed(2)} s per loop · ${a.loops === 0 ? 'loops forever' : `plays ${a.loops} time${a.loops === 1 ? '' : 's'}`}${a.hiddenDefault ? ' · still image separate from the animation' : ''}`
+        : 'multiple',
+    ]);
+  }
 
   const dl = h('dl', { class: 'facts', 'data-testid': 'source-facts' });
   for (const [k, v] of facts) {

@@ -22,7 +22,17 @@ export function renderResult(r: ConversionOutput): HTMLElement {
         : 'the source';
   let cls: string;
   let text: string;
-  if (v.identical) {
+  if (v.animation) {
+    const a = v.animation;
+    const timing = `${a.timingKept ? 'every frame delay kept' : 'frame delays CHANGED'}, ${a.loopsKept ? 'loop count kept' : 'loop count CHANGED'}`;
+    if (v.identical && a.timingKept && a.loopsKept) {
+      cls = 'identical';
+      text = `Verified: the output was decoded again (${v.verifierId}) and all ${a.frames} frames, composited as a viewer shows them, match ${baseline} exactly at ${v.bitDepth}-bit; ${timing}.`;
+    } else {
+      cls = 'differs';
+      text = `Measured: ${a.frames - a.framesIdentical} of ${a.frames} frames differ from ${baseline} (max per-channel difference ${v.maxChannelDiff} at ${v.bitDepth}-bit); ${timing}.`;
+    }
+  } else if (v.identical) {
     cls = 'identical';
     text = `Verified: the output was decoded again (${v.verifierId}) and every pixel matches ${baseline} exactly at ${v.bitDepth}-bit (per-channel difference 0, transparent pixels included).`;
   } else if (v.differingVisiblePixels === 0) {

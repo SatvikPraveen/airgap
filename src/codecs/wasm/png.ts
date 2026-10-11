@@ -9,6 +9,8 @@
  *    which always writes RGBA. Used only if the writer's probe fails.
  */
 import { injectMetadata } from '../../metadata/containers';
+import { decodeApng, encodeApng } from '../apng';
+import { alphaStats } from '../../pixels';
 import { encodePng } from '../png-writer';
 import type { Codec, CodecCapabilities, DecodedImage, EncodeOptions } from '../types';
 import { asDecoded, buildMetadata, compileWasm, fromImageData, u8view } from './shared';
@@ -34,6 +36,25 @@ function loadGlue(): Promise<Glue> {
 async function decodeWithRust(glue: Glue, bytes: Uint8Array): Promise<DecodedImage> {
   const { inspect } = await import('../../inspect');
   const header = inspect(bytes);
+  const still = await decodeStill(glue, bytes, header.metadata.bitDepth);
+  if (!header.metadata.isAnimated) return still;
+  // APNG: every frame, composited, each frame's data decoded by the same Rust decoder.
+  const animation = await decodeApng(bytes, async (png) => (await decodeStill(glue, png, header.metadata.bitDepth)).pixels);
+  if (!animation) return still;
+  // Transparency facts must hold for the whole animation, not only the still image.
+  const metadata = { ...still.metadata };
+  if (metadata.hasAlpha) {
+    for (const f of animation.frames) {
+      const st = alphaStats(f.pixels);
+      metadata.hasTransparency ||= st.hasTransparency;
+      metadata.hasSemiTransparency ||= st.hasSemiTransparency;
+    }
+  }
+  return { ...still, metadata, animation };
+}
+
+async function decodeStill(glue: Glue, bytes: Uint8Array, bitDepth: number): Promise<DecodedImage> {
+  const header = { metadata: { bitDepth } };
   const pixels =
     header.metadata.bitDepth === 16
       ? (() => {
@@ -73,11 +94,12 @@ export async function createAirgapPngCodec(): Promise<Codec> {
   return {
     id: 'airgap-png',
     format: 'png',
-    capabilities: { ...CAPABILITIES, encodeBitDepths: [...CAPABILITIES.encodeBitDepths], metadata: { ...CAPABILITIES.metadata } },
+    capabilities: { ...CAPABILITIES, encodeBitDepths: [...CAPABILITIES.encodeBitDepths], metadata: { ...CAPABILITIES.metadata }, animation: true },
     decode: (bytes) => decodeWithRust(glue, bytes),
     async encode(img, opts: EncodeOptions) {
       const px = img.pixels;
       if (px.bitDepth !== 8 && px.bitDepth !== 16) throw new Error(`PNG writer takes 8 or 16-bit input, got ${px.bitDepth}`);
+      if (img.animation) return withMetadata(encodeApng(img.animation, px, img.metadata.hasAlpha).bytes, opts);
       return withMetadata(encodePng(px, img.metadata.hasAlpha).bytes, opts);
     },
   };

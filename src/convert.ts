@@ -3,14 +3,14 @@
  * delegated to codecs, compositing to flatten.ts, colour to metadata/icc.ts.
  */
 import { needsFlatten, plannedBitDepth, type TargetSpec } from './capabilities';
-import type { Codec, CodecCapabilities, DecodedImage, ImageFormat, PixelData } from './codecs/types';
+import type { Animation, Codec, CodecCapabilities, DecodedImage, ImageFormat, PixelData } from './codecs/types';
 import { MIME } from './codecs/types';
 import { flattenPixels, type RGB } from './flatten';
 import { inspect } from './inspect';
 import { setExifGeometry, setOrientation, stripGps, normalizeExif } from './metadata/exif';
 import { convertToSrgb, parseIcc } from './metadata/icc';
 import { applyOrientation } from './orientation';
-import { alphaStats, comparePixels, convertBitDepth, diffMask, type PixelComparison } from './pixels';
+import { alphaStats, comparePixels, convertBitDepth, diffMask, maxValue, type PixelComparison } from './pixels';
 import { applyTransform, isIdentity, type TransformSpec } from './transform';
 
 export interface ConversionPlan {
@@ -45,6 +45,11 @@ export interface Verification extends PixelComparison {
   comparedAgainstConverted: boolean;
   /** The baseline is the source after the geometric edit (crop, rotate, resize). */
   comparedAgainstTransformed: boolean;
+  /**
+   * Animated output: every frame was decoded again and compared, plus delays and loop count.
+   * The pixel counts above are summed over frames; maxChannelDiff is over all of them.
+   */
+  animation?: { frames: number; framesIdentical: number; timingKept: boolean; loopsKept: boolean };
   metadata: { exif: MetadataOutcome; gps: MetadataOutcome; icc: MetadataOutcome; xmp: MetadataOutcome };
   /** Every metadata outcome matched the plan. */
   metadataOk: boolean;
@@ -92,45 +97,52 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   const { target } = plan;
   const enc = p.encoderCaps;
   const m = source.metadata;
-  let pixels: PixelData = source.pixels;
-  let converted = false;
+  // An animated source keeps its frames when the encoder writes animations (probed); otherwise
+  // the still image is converted and the loss list says the other frames are dropped.
+  const animate = !!source.animation && !!enc.animation;
 
   // 1. Colour: convert to sRGB if asked (matrix/TRC or evaluable LUT profiles).
   let iccOut: Uint8Array | undefined = m.icc;
+  let profile: ReturnType<typeof parseIcc> | undefined;
   if (m.icc && target.iccMode === 'convert-srgb' && !p.decoderCaps.decodeAppliesIcc) {
-    const profile = parseIcc(m.icc);
+    profile = parseIcc(m.icc);
     if (!profile.convertible) {
       throw new Error(`Cannot convert this ${profile.kind} ICC profile to sRGB${profile.lutUnsupported ? ` (${profile.lutUnsupported})` : ''}; choose preserve or strip.`);
     }
-    pixels = convertToSrgb(pixels, profile);
-    converted = true;
     iccOut = undefined; // the output is sRGB now
   }
-
-  // 1b. Geometry: crop, rotate/mirror, resize, at the source depth (before any narrowing).
-  let transformed = false;
-  let metadata = { ...m };
-  if (plan.transform && !isIdentity(pixels.width, pixels.height, plan.transform)) {
-    pixels = applyTransform(pixels, plan.transform);
-    transformed = true;
-    // A crop can remove every transparent pixel; resampling can create partial alpha at edges.
-    if (m.hasAlpha) metadata = { ...metadata, ...alphaStats(pixels) };
-  }
-
+  const converted = !!profile;
+  const transformed = !!plan.transform && !isIdentity(source.pixels.width, source.pixels.height, plan.transform);
   // 2. Bit depth the encoder will write.
-  const outDepth = plannedBitDepth(pixels.bitDepth, { decoder: p.decoderCaps, encoder: enc });
-  pixels = convertBitDepth(pixels, outDepth);
-
+  const outDepth = plannedBitDepth(source.pixels.bitDepth, { decoder: p.decoderCaps, encoder: enc });
   // 3. Flatten if the target has no alpha.
   const flatten = needsFlatten({ format: sourceFormat, metadata: m }, enc);
-  if (flatten) {
-    if (!plan.background) {
-      throw new FlattenRequiredError(
-        `The source has an alpha channel and ${target.format.toUpperCase()} cannot store one. Choose a background colour to flatten onto; Airgap will not silently composite onto black.`,
-      );
-    }
-    pixels = flattenPixels(pixels, plan.background);
-    metadata = { ...metadata, hasAlpha: false, hasTransparency: false, hasSemiTransparency: false };
+  if (flatten && !plan.background) {
+    throw new FlattenRequiredError(
+      `The source has an alpha channel and ${target.format.toUpperCase()} cannot store one. Choose a background colour to flatten onto; Airgap will not silently composite onto black.`,
+    );
+  }
+
+  /** Steps 1-3 on one image (the still, or one frame): colour, geometry at source depth, depth, flatten. */
+  const process = (px: PixelData): PixelData => {
+    let out = px;
+    if (profile) out = convertToSrgb(out, profile);
+    if (transformed) out = applyTransform(out, plan.transform!);
+    out = convertBitDepth(out, outDepth);
+    if (flatten) out = flattenPixels(out, plan.background!);
+    return out;
+  };
+  const pixels = process(source.pixels);
+  const animation: Animation | undefined = animate
+    ? { ...source.animation!, frames: source.animation!.frames.map((f) => ({ ...f, pixels: process(f.pixels) })) }
+    : undefined;
+
+  let metadata = { ...m };
+  if (flatten) metadata = { ...metadata, hasAlpha: false, hasTransparency: false, hasSemiTransparency: false };
+  else if (transformed && m.hasAlpha) {
+    // A crop can remove every transparent pixel; resampling can create partial alpha at edges.
+    const st = [pixels, ...(animation?.frames.map((f) => f.pixels) ?? [])].map((x) => alphaStats(x));
+    metadata = { ...metadata, hasTransparency: st.some((x) => x.hasTransparency), hasSemiTransparency: st.some((x) => x.hasSemiTransparency) };
   }
 
   // 4. Metadata payloads per mode, gated by what the encoder can carry.
@@ -148,7 +160,7 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   // loss list already says so and the verification below measures the real outcome.
   const lossless = target.lossless;
   let bytes = await p.encoder.encode(
-    { pixels, metadata },
+    { pixels, metadata, ...(animation && { animation }) },
     {
       lossless,
       ...(lossless ? {} : { quality: clampQuality(plan.quality) }),
@@ -178,13 +190,43 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
     }
   }
 
-  // 5. Verify pixels by decoding what we just produced.
+  // 5. Verify pixels by decoding what we just produced: the still image, and every frame.
   const back = await p.verifier.decode(bytes);
   const depth = Math.min(outDepth, back.pixels.bitDepth);
   const expected = convertBitDepth(pixels, depth);
   const actual = convertBitDepth(back.pixels, depth);
-  const cmp = comparePixels(expected, actual);
-  const mask = cmp.identical ? undefined : diffMask(expected, actual);
+  let cmp = comparePixels(expected, actual);
+  let mask = cmp.identical ? undefined : diffMask(expected, actual);
+  let animationCheck: Verification['animation'];
+  if (animation) {
+    const got = back.animation;
+    const n = animation.frames.length;
+    let framesIdentical = 0;
+    let timingKept = !!got && got.frames.length === n;
+    const total = { ...cmp };
+    for (let i = 0; i < n; i++) {
+      const want = convertBitDepth(animation.frames[i]!.pixels, depth);
+      const have = got?.frames[i] ? convertBitDepth(got.frames[i]!.pixels, depth) : undefined;
+      const c = have ? comparePixels(want, have) : { identical: false, differingPixels: want.width * want.height, differingVisiblePixels: want.width * want.height, maxChannelDiff: maxValue(depth) };
+      if (c.identical) framesIdentical++;
+      else {
+        const fm = have ? diffMask(want, have) : new Uint8Array(want.width * want.height).fill(255);
+        if (!mask) mask = fm;
+        else for (let k = 0; k < mask.length; k++) if (fm[k]! > mask[k]!) mask[k] = fm[k]!;
+      }
+      total.identical &&= c.identical;
+      total.differingPixels += c.differingPixels;
+      total.differingVisiblePixels += c.differingVisiblePixels;
+      total.maxChannelDiff = Math.max(total.maxChannelDiff, c.maxChannelDiff);
+      const f = animation.frames[i]!;
+      const g = got?.frames[i];
+      // Compare durations, not representations: 1/10 s and 10/100 s are the same delay.
+      if (!g || f.delayNum * g.delayDen !== g.delayNum * f.delayDen) timingKept = false;
+    }
+    const loopsKept = !!got && got.loops === animation.loops;
+    cmp = total;
+    animationCheck = { frames: n, framesIdentical, timingKept, loopsKept };
+  }
 
   // 6. Verify metadata by re-reading the container header.
   const h = inspect(bytes).metadata;
@@ -202,6 +244,7 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
     comparedAgainstFlattened: flatten,
     comparedAgainstConverted: converted,
     comparedAgainstTransformed: transformed,
+    ...(animationCheck && { animation: animationCheck }),
     metadata: {
       exif: outcome(wantExif, h.hasExif, m.hasExif),
       gps: outcome(wantGps, h.hasGps, m.hasGps),
