@@ -2,6 +2,24 @@ import type { CapabilityTable, ImageFormat } from '../codecs/types';
 import type { Verification } from '../convert';
 import type { SourceInfo } from '../protocol';
 import type { IccMode, MetadataMode } from '../capabilities';
+import type { CropRect, Rotation } from '../transform';
+
+/** The geometric edit as the controls hold it (single-file mode only). */
+export interface TransformState {
+  rotate: Rotation;
+  flipH: boolean;
+  flipV: boolean;
+  cropOn: boolean;
+  crop: CropRect;
+  resizeOn: boolean;
+  width: number;
+  height: number;
+  lockAspect: boolean;
+}
+
+export function initialTransform(width = 1, height = 1): TransformState {
+  return { rotate: 0, flipH: false, flipV: false, cropOn: false, crop: { x: 0, y: 0, width, height }, resizeOn: false, width, height, lockAspect: true };
+}
 
 export type TargetKey =
   | 'png'
@@ -59,6 +77,8 @@ export interface ConversionOutput {
   diffMask?: Uint8Array;
   /** Blob URL of the source preview, for the compare view. */
   sourceUrl: string;
+  /** The output geometry differs from the source (crop, rotation, resize): source and wipe views do not line up. */
+  geometryChanged: boolean;
 }
 
 /** A quality preview: the real pipeline at the current settings, shown without producing a result. */
@@ -73,6 +93,7 @@ export interface PreviewOutput {
   width: number;
   height: number;
   sourceUrl: string;
+  geometryChanged: boolean;
 }
 
 export type BatchStatus = 'waiting' | 'reading' | 'ready' | 'error' | 'converting' | 'done' | 'cancelled';
@@ -138,6 +159,7 @@ export interface AppState {
   previewCompareOpen: boolean;
   /** Above the auto-preview size the user runs previews one at a time; this is the plan key they asked for. */
   previewArmedKey: string | null;
+  transform: TransformState;
 }
 
 export function initialState(): AppState {
@@ -164,5 +186,6 @@ export function initialState(): AppState {
     previewError: null,
     previewCompareOpen: false,
     previewArmedKey: null,
+    transform: initialTransform(),
   };
 }

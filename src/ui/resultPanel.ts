@@ -13,7 +13,13 @@ const OUTCOME: Record<MetadataOutcome, string> = {
 
 export function renderResult(r: ConversionOutput): HTMLElement {
   const v = r.verification;
-  const baseline = v.comparedAgainstFlattened ? 'the flattened image' : v.comparedAgainstConverted ? 'the sRGB-converted image' : 'the source';
+  const baseline = v.comparedAgainstFlattened
+    ? 'the flattened image'
+    : v.comparedAgainstConverted
+      ? 'the sRGB-converted image'
+      : v.comparedAgainstTransformed
+        ? 'the source after your crop, rotation or resize'
+        : 'the source';
   let cls: string;
   let text: string;
   if (v.identical) {
@@ -40,6 +46,7 @@ export function renderResult(r: ConversionOutput): HTMLElement {
     height: r.height,
     diffMask: r.diffMask,
     differingPixels: v.differingPixels,
+    sourceComparable: !r.geometryChanged,
   });
 
   return h(
@@ -54,6 +61,8 @@ export function renderResult(r: ConversionOutput): HTMLElement {
         { class: 'facts' },
         h('dt', {}, 'Output'),
         h('dd', { 'data-testid': 'result-format' }, `${label(r.format)} · ${r.bitDepth}-bit · ${formatBytes(r.size)} · ${r.encoderId}`),
+        h('dt', {}, 'Size'),
+        h('dd', { 'data-testid': 'result-size' }, `${r.width} × ${r.height} px`),
         ...(r.colorLayout ? [h('dt', {}, 'Stored as'), h('dd', { 'data-testid': 'result-layout' }, r.colorLayout)] : []),
         h('dt', {}, 'File'),
         h('dd', {}, r.filename),

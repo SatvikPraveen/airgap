@@ -916,3 +916,38 @@ tr[data-status="reading"] td {
 .batch-result .verification {
   margin-bottom: 12px;
 }
+
+/* ---- transform fieldset -------------------------------------------------- */
+
+fieldset.transform .inline {
+  gap: 10px 14px;
+}
+
+fieldset.transform label.num {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+fieldset.transform input[type="number"] {
+  width: 84px;
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.error-inline {
+  color: var(--warn-pixels-ink);
+  font-size: 13px;
+}
+
+.losses li.geometry {
+  background: var(--warn-hidden-bg);
+  border-color: var(--warn-hidden-line);
+  color: var(--warn-hidden-ink);
+}

@@ -16,7 +16,9 @@ import { renderLosses } from './lossPanel';
 import { renderMetadataPanel } from './metadataPanel';
 import { renderResult } from './resultPanel';
 import { renderSource } from './sourcePanel';
-import { initialState, TARGET_ORDER, TARGETS, type AppState, type BatchItem, type TargetKey } from './state';
+import { initialState, initialTransform, TARGET_ORDER, TARGETS, type AppState, type BatchItem, type TargetKey } from './state';
+import { createTransformPanel } from './transformPanel';
+import { isIdentity, outputSize, transformError, type TransformSpec } from '../transform';
 import { inspect } from '../inspect';
 import { previewOnDemand, sizeRefusal, sizeWarning } from '../limits';
 import { createPreviewScheduler } from './preview';
@@ -76,9 +78,10 @@ export function mountApp(root: HTMLElement): AppHandle {
         size: out.bytes.byteLength,
         verification: out.verification,
         ...(out.diffMask && { diffMask: out.diffMask }),
-        width: src.info.width,
-        height: src.info.height,
+        width: out.width,
+        height: out.height,
         sourceUrl: src.previewUrl,
+        geometryChanged: out.verification.comparedAgainstTransformed,
       };
       render();
     },
@@ -129,6 +132,14 @@ export function mountApp(root: HTMLElement): AppHandle {
   );
   background.id = 'background';
 
+  const transformPanel = createTransformPanel(
+    (next) => {
+      state.transform = next;
+      render();
+    },
+    () => (state.source ? { width: state.source.info.width, height: state.source.info.height } : null),
+    () => state.transform,
+  );
   const metadataField = h('fieldset', { class: 'field', 'data-testid': 'metadata-field' });
   const iccField = h('fieldset', { class: 'field', 'data-testid': 'icc-field' });
   const lossHost = h('div', { 'data-testid': 'loss-panel' });
@@ -256,6 +267,7 @@ export function mountApp(root: HTMLElement): AppHandle {
         ),
         qualityField,
         backgroundField,
+        transformPanel.el,
         metadataField,
         iccField,
       ),
@@ -319,22 +331,50 @@ export function mountApp(root: HTMLElement): AppHandle {
   function currentPlan(): ConversionPlan | null {
     const src = state.source;
     const enc = encoderCaps(TARGETS[state.target].format);
-    if (!src || !enc) return null;
-    return planFor(src.info, enc);
+    if (!src || !enc || transformProblem()) return null;
+    return planFor(src.info, enc, transformSpec());
   }
 
   /** Identity of a preview: the source and every setting that changes the output bytes. */
   const previewKey = (id: number, plan: ConversionPlan): string => `${id}|${state.quality}|${JSON.stringify(plan)}`;
   const previewQualityOf = (key: string): number => Number(key.split('|')[1]);
 
-  function lossesFor(info: SourceInfo, key: TargetKey): Loss[] | null {
+  /** The geometric edit for the single source, or undefined (batch mode, no source, or no edit). */
+  function transformSpec(): TransformSpec | undefined {
+    const src = state.source;
+    if (!src) return undefined;
+    const t = state.transform;
+    const spec: TransformSpec = {
+      rotate: t.rotate,
+      flipH: t.flipH,
+      flipV: t.flipV,
+      ...(t.cropOn && { crop: { ...t.crop } }),
+      ...(t.resizeOn && { resize: { width: t.width, height: t.height } }),
+    };
+    if (transformError(src.info.width, src.info.height, spec)) return spec;
+    return isIdentity(src.info.width, src.info.height, spec) ? undefined : spec;
+  }
+
+  /** Why the current edit cannot run, or null. Includes the memory guard on the output size. */
+  function transformProblem(): string | null {
+    const src = state.source;
+    const spec = transformSpec();
+    if (!src || !spec) return null;
+    const err = transformError(src.info.width, src.info.height, spec);
+    if (err) return err;
+    const out = outputSize(src.info.width, src.info.height, spec);
+    return sizeRefusal(out.width, out.height);
+  }
+
+  function lossesFor(info: SourceInfo, key: TargetKey, transform?: TransformSpec): Loss[] | null {
     const enc = encoderCaps(TARGETS[key].format);
     if (!enc) return null;
-    return computeLosses({ format: info.format, metadata: info.metadata }, targetSpec(key), { decoder: info.decoder.capabilities, encoder: enc });
+    const geometry = transform && !transformError(info.width, info.height, transform) ? { width: info.width, height: info.height, transform } : undefined;
+    return computeLosses({ format: info.format, metadata: info.metadata }, targetSpec(key), { decoder: info.decoder.capabilities, encoder: enc }, geometry);
   }
 
   function targetLosses(key: TargetKey): Loss[] | null {
-    return state.source ? lossesFor(state.source.info, key) : null;
+    return state.source ? lossesFor(state.source.info, key, transformSpec()) : null;
   }
 
   /** Per readable batch file, in queue order; null until the encoder is probed. */
@@ -350,12 +390,13 @@ export function mountApp(root: HTMLElement): AppHandle {
   }
 
   /** The plan for one file (single or batch) under the current settings. */
-  function planFor(info: SourceInfo, enc: CodecCapabilities): ConversionPlan {
+  function planFor(info: SourceInfo, enc: CodecCapabilities, transform?: TransformSpec): ConversionPlan {
     const flatten = needsFlatten({ format: info.format, metadata: info.metadata }, enc);
     return {
       target: targetSpec(state.target),
       quality: state.quality / 100,
       ...(flatten ? { background: parseHexColor(state.background) } : {}),
+      ...(transform && { transform }),
     };
   }
 
@@ -472,6 +513,13 @@ export function mountApp(root: HTMLElement): AppHandle {
     }
     iccRadios.sync(iccDisabled);
 
+    transformPanel.el.hidden = !src;
+    if (src) {
+      const spec = transformSpec();
+      const out = spec && !transformError(src.info.width, src.info.height, spec) ? outputSize(src.info.width, src.info.height, spec) : { width: src.info.width, height: src.info.height };
+      transformPanel.sync(state.transform, { width: src.info.width, height: src.info.height }, out, transformProblem());
+    }
+
     clear(sourceHost);
     if (src) sourceHost.append(renderSource(src));
     else if (state.batch) sourceHost.append(renderBatchQueue(state.batch, { onRemove: removeFromBatch }));
@@ -503,7 +551,7 @@ export function mountApp(root: HTMLElement): AppHandle {
     }
     const readable = batchInfos().length;
     convertBtn.textContent = state.batch ? `Convert ${readable} file${readable === 1 ? '' : 's'}` : 'Convert';
-    convertBtn.disabled = !state.ready || (!src && readable === 0) || state.busy !== 'idle' || !targetAvailable;
+    convertBtn.disabled = !state.ready || (!src && readable === 0) || state.busy !== 'idle' || !targetAvailable || !!transformProblem();
     cancelBtn.hidden = state.busy === 'idle';
     status.textContent =
       state.busy === 'loading'
@@ -556,7 +604,7 @@ export function mountApp(root: HTMLElement): AppHandle {
     previewHost.append(
       renderPreview({
         quality: state.quality,
-        pixelCount: src.info.width * src.info.height,
+        pixelCount: state.preview ? state.preview.width * state.preview.height : src.info.width * src.info.height,
         preview: state.preview,
         fresh: state.preview?.key === key,
         busy: state.previewBusy,
@@ -791,8 +839,11 @@ export function mountApp(root: HTMLElement): AppHandle {
         state.notice = sizeWarning(header.width, header.height, header.metadata.bitDepth);
       }
       const { id, info } = await worker.load(bytes);
+      const sameFile = state.source?.file === file;
       discardSource();
       state.source = { id, file, info, previewUrl: URL.createObjectURL(file) };
+      // A new file starts unedited; a reload of the same file (after cancel or a crash) keeps the edit.
+      if (!sameFile) state.transform = initialTransform(info.width, info.height);
     } catch (err) {
       if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;
     } finally {
@@ -827,11 +878,12 @@ export function mountApp(root: HTMLElement): AppHandle {
         filename,
         verification: out.verification,
         target: state.target,
-        pixelCount: src.info.width * src.info.height,
-        width: src.info.width,
-        height: src.info.height,
+        pixelCount: out.width * out.height,
+        width: out.width,
+        height: out.height,
         ...(out.diffMask && { diffMask: out.diffMask }),
         sourceUrl: src.previewUrl,
+        geometryChanged: out.verification.comparedAgainstTransformed,
       };
     } catch (err) {
       if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;

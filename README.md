@@ -54,7 +54,11 @@ Most converters silently destroy data. Airgap:
   before you press Convert, with the heat map one click away;
 - **converts batches**: drop several files, one set of settings, every file
   verified on its own, the losses counted per file ("EXIF removed: 3 of 7
-  files"), and one ZIP archive written in-house, with no compression library.
+  files"), and one ZIP archive written in-house, with no compression library;
+- treats **crop, rotate, mirror and resize as declared edits**: crop and
+  rotation keep every value exactly and stay allowed under "Lossless only";
+  resizing (Lanczos-3, premultiplied alpha, at the source bit depth) is listed
+  as the pixel loss it is.
 
 ## Verify the privacy claim yourself
 
@@ -316,6 +320,39 @@ request for. Above 4 megapixels the preview does not run on every move (an
 AVIF encode of a large image takes seconds); a button runs it once for the
 current settings instead.
 
+## Crop, rotate, mirror, resize
+
+The **Transform** fieldset edits geometry before encoding, in a fixed order:
+crop (in the pixels of the upright source, as its thumbnail shows it), then
+mirror, then rotate by quarter turns, then resize to the requested output
+size. The code (`src/transform.ts`) is pure TypeScript on the decoded samples
+at their own bit depth; a canvas is never involved, because a canvas
+premultiplies alpha and clamps to 8 bits.
+
+| Edit | Listed as | Under "Lossless only" | What the verification compares against |
+| --- | --- | --- | --- |
+| Crop | `geometry`: "N of M pixels are removed; every pixel kept is copied exactly" | allowed | the cropped source |
+| Rotate / mirror | `geometry`: every value kept, positions change | allowed | the rotated source |
+| Resize | `pixels`: every output value is interpolated | excluded | the resampled image |
+
+Mirroring and rotating compose to one of the eight EXIF orientations and run
+as a single pass; a unit test checks all sixteen control combinations against
+step-by-step application. Resizing uses a separable Lanczos-3 filter with
+pixel centres aligned, the kernel widened by the scale factor when
+downscaling (no aliasing), clamped edges and taps normalised to sum to one,
+so a constant image stays exactly constant at 8 and 16 bits. It filters
+premultiplied alpha, so the colour hidden under transparent pixels cannot
+fringe visible edges, and the loss text says the colour under fully
+transparent output pixels becomes 0. It works on the stored, gamma-encoded
+values, not linear light, and says that too.
+
+When EXIF is carried through an edit, its pixel-dimension tags are rewritten
+to the output size and the IFD1 thumbnail, which would show the old framing,
+is removed; both are listed. The compare view disables its Source and Wipe
+views after a geometric edit, since they would not line up, and its heat map
+compares the output with the edited source. Transforms apply to single files;
+batch mode does not offer them.
+
 ## Batch conversion
 
 Drop, pick or paste two or more files and Airgap enters batch mode: a queue
@@ -449,6 +486,7 @@ src/capabilities.ts        pure: source + target + probed pipeline -> list of lo
 src/convert.ts             pure orchestration: ICC, bit depth, flatten, metadata, verification, diff mask
 src/limits.ts              memory guard thresholds and messages, preview auto-run limit
 src/batch.ts               pure: output naming, per-file loss aggregation, batch tallies
+src/transform.ts           pure: crop, the eight orientations in one pass, Lanczos-3 resampling
 src/zip.ts                 pure: store-only ZIP writer (CRC-32, central directory), unique names
 src/metadata/tiff-ifd.ts   generic TIFF IFD parser/serializer
 src/metadata/exif.ts       EXIF summarise, strip GPS, normalise orientation
@@ -460,12 +498,13 @@ src/worker.ts              conversion worker
 src/ui/                    drop zone, source facts, metadata inspector, target picker, modes,
                            loss panel, result, compare view, cancel/recovery (workerClient),
                            live quality preview (preview.ts scheduling, previewPanel.ts),
-                           batch queue, aggregated losses and archive download (batchPanel.ts)
+                           batch queue, aggregated losses and archive download (batchPanel.ts),
+                           transform fieldset (transformPanel.ts)
 scripts/                   fixtures, icons, screenshots, bundle report, budget, notices, checksums
 tests/unit/                Vitest, node: matrix, metadata layer, ICC, PNG writer vs pngjs, TIFF writer vs two readers,
-                           ZIP writer vs fflate, preview scheduling, batch helpers
+                           ZIP writer vs fflate, preview scheduling, batch helpers, transforms
 tests/browser/             Vitest browser mode: real codecs, probes, full pipeline, exifr
-tests/e2e/                 Playwright: downloads re-read independently, privacy trap, inspector, compare, recovery, preview, batch
+tests/e2e/                 Playwright: downloads re-read independently, privacy trap, inspector, compare, recovery, preview, batch, transform
 tests/fixtures/            generated by scripts/make-fixtures.mjs
 licenses/                  verbatim licence texts of everything bundled (see THIRD_PARTY_NOTICES.md)
 docs/                      codec survey, screenshots

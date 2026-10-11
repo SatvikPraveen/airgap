@@ -70,7 +70,7 @@ export function renderPreview(view: PreviewView): HTMLElement {
       if (!cachedCompare || cachedCompare.key !== p.key) {
         cachedCompare = {
           key: p.key,
-          el: renderCompareView({ sourceUrl: p.sourceUrl, outputUrl: p.url, width: p.width, height: p.height, diffMask: p.diffMask, differingPixels: p.verification.differingPixels }),
+          el: renderCompareView({ sourceUrl: p.sourceUrl, outputUrl: p.url, width: p.width, height: p.height, diffMask: p.diffMask, differingPixels: p.verification.differingPixels, sourceComparable: !p.geometryChanged }),
         };
       }
       const host = h('div', { class: view.fresh ? 'preview-compare' : 'preview-compare stale', 'data-testid': 'preview-compare' });

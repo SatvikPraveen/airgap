@@ -13,6 +13,11 @@ export interface CompareInput {
   /** Per-pixel change magnitude, 0..255, or undefined when the output is identical. */
   diffMask?: Uint8Array | undefined;
   differingPixels: number;
+  /**
+   * False after a crop, rotation or resize: the source has a different geometry, so the
+   * Source and Wipe views would not line up. The heat map compares against the transformed source.
+   */
+  sourceComparable?: boolean;
 }
 
 type View = 'output' | 'source' | 'diff' | 'wipe';
@@ -33,11 +38,12 @@ export function renderCompareView(c: CompareInput): HTMLElement {
   const zoomBtn = h('button', { class: 'button secondary small', type: 'button', 'data-testid': 'compare-zoom' });
   const wipeInput = h('input', { type: 'range', min: '0', max: '100', value: String(wipe), 'aria-label': 'Wipe position', 'data-testid': 'compare-wipe' });
 
+  const comparable = c.sourceComparable ?? true;
   const options: { key: View; label: string; disabled?: boolean }[] = [
     { key: 'output', label: 'Output' },
-    { key: 'source', label: 'Source' },
+    { key: 'source', label: 'Source', disabled: !comparable },
     { key: 'diff', label: c.diffMask ? `Changed pixels (${c.differingPixels.toLocaleString()})` : 'Changed pixels (none)', disabled: !c.diffMask },
-    { key: 'wipe', label: 'Wipe' },
+    { key: 'wipe', label: 'Wipe', disabled: !comparable },
   ];
   const buttons = new Map<View, HTMLButtonElement>();
   for (const o of options) {
@@ -131,5 +137,6 @@ export function renderCompareView(c: CompareInput): HTMLElement {
     c.diffMask
       ? h('p', { class: 'hint' }, 'Heat map: yellow marks a pixel whose largest channel difference is 1, red marks the largest differences (log scale). Drawn from the same comparison the verification reports.')
       : h('p', { class: 'hint' }, 'The verification found no pixel that differs, so there is nothing to highlight.'),
+    comparable ? null : h('p', { class: 'hint', 'data-testid': 'compare-geometry-note' }, 'The output has a different geometry from the source (crop, rotation or resize), so the Source and Wipe views are off. Changed pixels compare the output with the source after your edit.'),
   );
 }
