@@ -59,7 +59,7 @@ jobs:
       #   gh attestation verify checksums.txt --repo ${{ github.repository }}
       #   sha256sum -c checksums.txt   (against files fetched from the site)
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/checksums.txt
 
