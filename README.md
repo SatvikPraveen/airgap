@@ -16,7 +16,7 @@ Formats: PNG, JPEG, WebP, AVIF, JPEG XL, TIFF and QOI in and out. HEIC is
 deliberately absent (see below).
 
 <p align="center">
-  <img src="docs/screenshots/converted-light.png" alt="Airgap after converting a JPEG: the source facts, the metadata inspector, the loss list, the verification result and the heat map of changed pixels" width="720" />
+  <img src="docs/screenshots/converted-light.png" alt="Airgap after converting a JPEG: the source facts, the live quality preview, the transform controls, the loss list, the verification result and the heat map of changed pixels" width="720" />
 </p>
 
 ## Why this exists

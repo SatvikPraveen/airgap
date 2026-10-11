@@ -35,6 +35,10 @@ const loadAndConvert = (fixture, target) => async (page) => {
     await page.getByTestId('meta-strip-gps').check().catch(() => {});
     await page.getByTestId('convert').click();
     await page.getByTestId('verification').waitFor({ timeout: 60_000 });
+    // Lossy targets show a live preview line; wait until it holds numbers for the current settings.
+    if (await page.getByTestId('quality-field').isVisible()) {
+      await page.locator('[data-testid="preview-stat"][data-fresh="true"] [data-testid="preview-summary"]').waitFor({ timeout: 60_000 });
+    }
   }
 };
 
