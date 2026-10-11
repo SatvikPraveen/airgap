@@ -46,7 +46,7 @@ test('three PNGs -> PNG: every output in the ZIP is pixel-identical to its sourc
   await expect(page.getByTestId('batch-verification')).toContainText('3 of 3 readable files converted: 3 verified pixel-identical, 0 with measured differences, metadata as planned in all.');
 });
 
-test('mixed batch: the loss panel counts files per loss, and the metadata controls appear when any file has EXIF', async ({ page }) => {
+test('mixed batch: the loss panel counts files per loss, and the metadata controls appear when any file has EXIF', async ({ page, browserName }) => {
   await pickFixtures(page, ['exif-gps.jpg', 'rgb8.png', 'rgb16.png']);
   await expect(page.getByTestId('metadata-field')).toBeVisible();
   await selectTarget(page, 'webp-lossless');
@@ -54,11 +54,18 @@ test('mixed batch: the loss panel counts files per loss, and the metadata contro
   await expect(exif).toContainText('1 of 3 files:');
   await expect(exif).toContainText('GPS');
   await expect(page.locator('[data-loss="bit-depth"]')).toContainText('1 of 3 files:');
-  await expect(page.locator('[data-loss="decoder-unverified"]')).toHaveCount(0);
+  // WebKit's own JPEG decoder (ImageIO) rounds differently from mozjpeg, so the JPEG decoder cannot
+  // be cross-checked there and the one JPEG in the batch is honestly flagged (tests/browser/engine-matrix).
+  if (browserName === 'webkit') await expect(page.locator('[data-loss="decoder-unverified"]')).toContainText('1 of 3 files:');
+  else await expect(page.locator('[data-loss="decoder-unverified"]')).toHaveCount(0);
   // Lossless-only: one 16-bit file loses bits in WebP, so the target is excluded for the whole batch.
   await page.getByTestId('lossless-only').check();
   await expect(page.getByTestId('target').locator('option[value="webp-lossless"]')).toBeDisabled();
-  await expect(page.getByTestId('target')).toHaveValue('png');
+  if (browserName === 'webkit') {
+    // The unverified JPEG decoder is a pixel loss for every target: nothing is lossless for this batch.
+    await expect(page.getByTestId('target').locator('option[value="png"]')).toBeDisabled();
+    await expect(page.getByTestId('no-target')).toContainText('every file in this batch');
+  } else await expect(page.getByTestId('target')).toHaveValue('png');
   await page.getByTestId('lossless-only').uncheck();
   await selectTarget(page, 'png');
   const files = await convertAllAndDownloadZip(page, 3);

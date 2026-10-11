@@ -1,4 +1,8 @@
+import { server } from 'vitest/browser';
 import type { DecodedImage, PixelData } from '../../src/codecs/types';
+
+/** The engine this browser-mode run is in: 'chromium', 'firefox' or 'webkit'. */
+export const ENGINE = server.browser as 'chromium' | 'firefox' | 'webkit';
 import { allocate } from '../../src/pixels';
 
 export async function fixtureBytes(name: string): Promise<Uint8Array> {
@@ -52,4 +56,14 @@ export function asImage(px: PixelData, over: Partial<DecodedImage['metadata']> =
       ...over,
     },
   };
+}
+
+/** Max channel difference over pixels that are fully opaque in `a` (premultiplied canvases only promise these). */
+export function maxOpaqueDiff(a: ArrayLike<number>, b: ArrayLike<number>): number {
+  let m = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    if (a[i + 3] !== 255) continue;
+    for (let c = 0; c < 4; c++) m = Math.max(m, Math.abs(a[i + c]! - b[i + c]!));
+  }
+  return m;
 }

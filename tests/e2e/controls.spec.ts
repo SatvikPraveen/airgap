@@ -118,7 +118,10 @@ test('the file picker accepts every format the app reads (AVIF, JPEG XL and TIFF
   await expect(page.getByTestId('dropzone')).toContainText('AVIF, JPEG XL or TIFF');
 });
 
-test('pasting an image file from the clipboard loads it', async ({ page }) => {
+test('pasting an image file from the clipboard loads it', async ({ page, browserName }) => {
+  // Firefox's ClipboardEvent constructor copies clipboardData into a new, empty, protected
+  // DataTransfer (measured: files 0, items 0), so a synthetic paste cannot carry a file there.
+  test.skip(browserName === 'firefox', 'synthetic paste events cannot carry files in Firefox');
   await page.evaluate(
     ({ bytes, name, type }) => {
       const dt = new DataTransfer();

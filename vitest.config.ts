@@ -2,6 +2,12 @@ import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 import { wasmBase64 } from './vite-plugins.ts';
 
+/**
+ * Engines for browser mode: AIRGAP_BROWSERS=chromium,firefox,webkit (default chromium).
+ * CI runs one engine per job; locally the default keeps the loop fast.
+ */
+const BROWSERS = (process.env['AIRGAP_BROWSERS'] ?? 'chromium').split(',').map((b) => b.trim()).filter(Boolean) as ('chromium' | 'firefox' | 'webkit')[];
+
 export default defineConfig({
   plugins: [wasmBase64()],
   test: {
@@ -25,7 +31,7 @@ export default defineConfig({
             enabled: true,
             headless: true,
             provider: playwright(),
-            instances: [{ browser: 'chromium' }],
+            instances: BROWSERS.map((browser) => ({ browser })),
             screenshotFailures: false,
           },
         },

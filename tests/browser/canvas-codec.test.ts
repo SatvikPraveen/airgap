@@ -9,7 +9,7 @@ import { probeCodec } from '../../src/codecs/probe';
 import { summarizeExif } from '../../src/metadata/exif';
 import { extractMetadata } from '../../src/metadata/containers';
 import * as P from '../fixtures/pattern.mjs';
-import { firstMismatch, fixtureBytes, maxChannelDiff, rasterFrom } from './helpers';
+import { ENGINE, firstMismatch, fixtureBytes, maxChannelDiff, maxOpaqueDiff, rasterFrom } from './helpers';
 
 const png = createCanvasCodec('png');
 const jpeg = createCanvasCodec('jpeg');
@@ -25,9 +25,17 @@ describe('canvas codec declarations vs probe', () => {
     expect(r.probe.checks['exactAlpha']).toEqual({ claimed: false, verified: false });
     expect(r.capabilities.metadata).toEqual({ exif: true, icc: true, xmp: true });
   });
-  it('WebP: lossless verified in Chromium at quality 1', async () => {
+  it('WebP: lossless verified at quality 1 where the canvas can encode WebP; elsewhere the probe claims nothing', async () => {
     const r = await probeCodec(webp);
-    expect(r.capabilities.lossless).toBe(true);
+    if (ENGINE === 'webkit') {
+      // WebKit's convertToBlob silently returns PNG for image/webp; the codec refuses that output.
+      expect(r.probe.ok).toBe(false);
+      expect(r.capabilities.encode).toBe(false);
+      expect(r.capabilities.lossless).toBe(false);
+      expect(r.probe.detail).toMatch(/cannot encode image\/webp/);
+    } else {
+      expect(r.capabilities.lossless).toBe(true);
+    }
     expect(r.capabilities.exactAlpha).toBe(false);
   });
   it('JPEG: lossy-only, no alpha', async () => {
@@ -63,14 +71,18 @@ describe('canvas encode + container metadata', () => {
   it('PNG -> PNG opaque round trip is exact; alpha-0 RGB is lost (documented)', async () => {
     const a = await png.decode(await fixtureBytes('rgba-partial.png'));
     const b = await png.decode(await png.encode(a, { lossless: true }));
-    expect(maxChannelDiff(a.pixels.data, b.pixels.data)).toBe(0); // stable after the first pass
+    // Opaque pixels survive exactly in every engine. Chromium and WebKit also reach a fixed point
+    // after one pass; Firefox keeps re-rounding semi-transparent pixels on every pass.
+    expect(maxOpaqueDiff(a.pixels.data, b.pixels.data)).toBe(0);
+    if (ENGINE !== 'firefox') expect(maxChannelDiff(a.pixels.data, b.pixels.data)).toBe(0);
+    else expect(maxChannelDiff(a.pixels.data, b.pixels.data)).toBeGreaterThan(0);
     const noise = P.lcg(2);
     const truth = rasterFrom(P.RGBA_PARTIAL, (x, y) => P.rgbaPixel(x, y, noise));
     expect(maxChannelDiff(truth.data, a.pixels.data)).toBeGreaterThan(0); // the decode already lost it
   });
   it('embeds EXIF into a canvas-encoded JPEG/PNG/WebP', async () => {
     const src = await jpeg.decode(await fixtureBytes('exif-gps.jpg'));
-    for (const c of [png, jpeg, webp]) {
+    for (const c of ENGINE === 'webkit' ? [png, jpeg] : [png, jpeg, webp]) {
       const out = await c.encode(src, { lossless: c.format !== 'jpeg', quality: 0.9, exif: src.metadata.exif! });
       const back = extractMetadata(out, c.format);
       expect(summarizeExif(back.exif!).make, c.id).toBe('Airgap Fixtures');

@@ -4,13 +4,16 @@ import { h } from './dom';
 export function createDropzone(onFiles: (files: File[]) => void): HTMLElement {
   // Paste from the clipboard (copied files or image data) loads them like a drop.
   document.addEventListener('paste', (e) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    const files: File[] = [];
-    for (const item of Array.from(items)) {
-      if (item.kind !== 'file') continue;
-      const f = item.getAsFile();
-      if (f) files.push(f);
+    const data = e.clipboardData;
+    if (!data) return;
+    // Engines differ in which view of a pasted file they populate: read `files`, then `items`.
+    let files: File[] = Array.from(data.files ?? []);
+    if (!files.length) {
+      for (const item of Array.from(data.items ?? [])) {
+        if (item.kind !== 'file') continue;
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
     }
     if (files.length) {
       e.preventDefault();
