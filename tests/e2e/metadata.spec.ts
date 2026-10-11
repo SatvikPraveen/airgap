@@ -119,12 +119,25 @@ test('ICC: matrix profile offers all three modes; convert changes values, preser
   await expect(page.locator('[data-loss="icc"]')).toContainText('Values preserved, appearance not');
 });
 
-test('ICC: LUT profile disables convert-to-sRGB with a stated reason', async ({ page }) => {
+test('ICC: an evaluable LUT profile converts to sRGB, says how, and drops the profile', async ({ page }) => {
   await pickFixture(page, 'icc-lut.jpg');
   await expect(page.locator('[data-fact="icc-profile"]')).toContainText('LUT-based');
   await selectTarget(page, 'png');
   const convert = page.getByTestId('icc-convert');
-  await expect(convert).toBeDisabled();
-  await expect(page.getByTestId('icc-field')).toContainText('will not approximate');
+  await expect(convert).toBeEnabled();
+  await convert.check();
+  await expect(page.locator('[data-loss="icc-convert"]')).toContainText('tetrahedral interpolation');
+  const { bytes } = await convertAndDownload(page);
+  expect(pngChunkTypes(bytes)).not.toContain('iCCP');
+  await expect(page.getByTestId('verification')).toContainText('the sRGB-converted image');
+  await expect(page.getByTestId('verification')).toHaveAttribute('data-identical', 'true');
+});
+
+test('ICC: a LUT profile that cannot be evaluated (BtoA only) disables convert-to-sRGB with a stated reason', async ({ page }) => {
+  await pickFixture(page, 'icc-lut-btoa.jpg');
+  await expect(page.locator('[data-fact="icc-profile"]')).toContainText('LUT-based');
+  await selectTarget(page, 'png');
+  await expect(page.getByTestId('icc-convert')).toBeDisabled();
+  await expect(page.getByTestId('icc-field')).toContainText('cannot be evaluated exactly');
   await expect(page.getByTestId('icc-preserve')).toBeEnabled();
 });

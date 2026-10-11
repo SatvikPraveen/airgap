@@ -247,9 +247,35 @@ says is what the output will contain.
 - *Preserve*: values and appearance preserved, if the target can embed a
   profile.
 - *Convert to sRGB*: appearance preserved, values changed, profile dropped.
-  Only matrix/TRC profiles (sRGB, Display P3, Adobe RGB, ProPhoto and the
-  like) are converted. On a LUT-based profile the option is **disabled with
-  the reason shown**; Airgap never approximates a LUT with the matrix path.
+  Two kinds of profile are converted, each evaluated exactly as it is
+  written: matrix/TRC profiles (sRGB, Display P3, Adobe RGB, ProPhoto and the
+  like) and LUT-based RGB profiles. For a LUT profile Airgap evaluates the
+  A2B1 tag (relative colorimetric), or A2B0 when A2B1 is absent, in any of
+  the three encodings (`lut8`, `lut16`, `lutAtoB`), with an XYZ or Lab
+  connection space and its exact encoding (legacy 16-bit Lab for `lut16`).
+  The colour look-up table is interpolated tetrahedrally, as LittleCMS does.
+  Anything else, such as CMYK or n-channel input, BtoA-only tags or unknown
+  element types, leaves the option **disabled with the reason shown**. Airgap
+  never approximates one kind of profile with the other.
+
+  The evaluation is checked against LittleCMS 2, the reference colour engine,
+  used as a test-only dependency that never ships. Profiles in all three
+  encodings are written by an independent builder from the ICC
+  specification, and a 9×9×9 grid plus 600 random colours are converted by
+  both engines. Measured agreement, per channel at 8 bits:
+
+  | Profile | Identical | Max difference |
+  | --- | --- | --- |
+  | `lut16`, XYZ, 2-point CLUT after linearising tables | 98.8% | 1 |
+  | `lut16`, Lab (legacy encoding), 17-point CLUT | 99.0% | 1 |
+  | `lut8`, Lab, 17-point CLUT | 99.0% | 1 |
+  | `lutAtoB`, Lab, parametric A curves, 9×7×5 CLUT, M curves, matrix + offset | 98.8% | 1 |
+  | A2B1 chosen over a different A2B0 | 98.8% | 1 |
+  | Display P3 matrix/TRC (the existing path) | 99.1% | 1 |
+
+  The remaining differences are LittleCMS rounding its 16-bit output. A LUT
+  profile built to encode the same transform as the Display P3 matrix profile
+  produces the same pixels as the matrix path, within one level.
 
 **Colour descriptions (CICP).** AVIF (`colr`/nclx), PNG (`cICP`) and JPEG XL
 (the codestream's colour encoding) can declare primaries and a transfer
@@ -555,7 +581,7 @@ src/metadata/tiff-ifd.ts   generic TIFF IFD parser/serializer
 src/metadata/exif.ts       EXIF summarise, strip GPS, normalise orientation
 src/metadata/exif-list.ts  every tag as a row, and what each mode does to it
 src/metadata/containers.ts EXIF/ICC/XMP in and out of JPEG, PNG, WebP containers
-src/metadata/icc.ts        ICC parse, matrix/LUT classification, matrix/TRC -> sRGB
+src/metadata/icc.ts        ICC parse; matrix/TRC and LUT (lut8/lut16/lutAtoB) evaluation to sRGB
 src/worker-boot.ts         inline blob: bootstrap so the worker inherits the CSP
 src/worker.ts              conversion worker
 src/ui/                    drop zone, source facts, metadata inspector, target picker, modes,

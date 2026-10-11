@@ -204,7 +204,7 @@ export function mountApp(root: HTMLElement): AppHandle {
     [
       { value: 'strip', label: 'Strip profile', hint: 'Keeps pixel VALUES; appearance may change because viewers will assume sRGB (default).', testid: 'icc-strip' },
       { value: 'preserve', label: 'Preserve profile', hint: 'Keeps values AND appearance, if the target format can embed a profile.', testid: 'icc-preserve' },
-      { value: 'convert-srgb', label: 'Convert to sRGB', hint: 'Keeps APPEARANCE; changes pixel values. Matrix/TRC profiles only.', testid: 'icc-convert' },
+      { value: 'convert-srgb', label: 'Convert to sRGB', hint: 'Keeps APPEARANCE; changes pixel values. Matrix/TRC and RGB LUT profiles.', testid: 'icc-convert' },
     ],
     () => state.iccMode,
     (v) => (state.iccMode = v),
@@ -502,13 +502,12 @@ export function mountApp(root: HTMLElement): AppHandle {
     iccField.hidden = iccSources.length === 0;
     iccRadios.reset();
     const iccDisabled: Partial<Record<IccMode, string>> = {};
-    const nonMatrix = iccSources.find((info) => info.metadata.iccKind !== 'matrix');
+    const nonMatrix = iccSources.find((info) => !info.metadata.iccConvertible);
     if (nonMatrix) {
       const kind = nonMatrix.metadata.iccKind ?? 'unknown';
       const who = state.batch?.items.find((it) => it.info === nonMatrix)?.file.name;
-      iccDisabled['convert-srgb'] = state.batch
-        ? `Not available: ${who ?? 'a file in the batch'} has a ${kind} profile. Airgap converts matrix/TRC profiles only and will not approximate a LUT-based profile.`
-        : `Not available: this is a ${kind} profile. Airgap converts matrix/TRC profiles only and will not approximate a LUT-based profile.`;
+      const why = 'Airgap converts matrix/TRC and RGB LUT profiles it can evaluate exactly, and never approximates one.';
+      iccDisabled['convert-srgb'] = state.batch ? `Not available: ${who ?? 'a file in the batch'} has a ${kind} profile it cannot evaluate. ${why}` : `Not available: this ${kind} profile cannot be evaluated exactly. ${why}`;
       if (state.iccMode === 'convert-srgb') state.iccMode = 'strip';
     }
     iccRadios.sync(iccDisabled);
