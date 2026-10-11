@@ -24,3 +24,10 @@ export const APNG_OPS: {
   frames: { x: number; y: number; w: number; h: number; delay: [number, number]; dispose: number; blend: number; fill: (x: number, y: number) => number[] }[];
 };
 export function apngOpsExpectedFrames(): Uint8Array[];
+export const WEBP_OPS: {
+  width: number;
+  height: number;
+  loops: number;
+  frames: { x: number; y: number; w: number; h: number; duration: number; blend: boolean; dispose: boolean; fill: (x: number, y: number) => number[] }[];
+};
+export function webpLibwebpFrames(): { width: number; height: number; frames: Uint8Array[] };

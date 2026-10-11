@@ -197,3 +197,38 @@ export function apngOpsExpectedFrames() {
   }
   return out;
 }
+
+/**
+ * webp-ops.webp: an animated WebP built by hand. Frame 1 alpha-blends semi-transparent pixels
+ * over the semi-transparent band (libwebp's integer blend), and is disposed to background.
+ * X/Y offsets are even, as the format requires.
+ */
+export const WEBP_OPS = {
+  width: 32,
+  height: 24,
+  loops: 3,
+  frames: [
+    { x: 0, y: 0, w: 32, h: 24, duration: 100, blend: false, dispose: false, fill: (x, y) => [x * 8, y * 10, 128, y >= 8 && y < 12 ? 100 : 255] },
+    { x: 4, y: 2, w: 10, h: 8, duration: 70, blend: true, dispose: true, fill: (x, y) => [250, 10 + x * 20, 10, (x + y) % 3 === 0 ? 0 : 60 + 30 * ((x + y) % 4)] },
+    { x: 12, y: 6, w: 9, h: 10, duration: 250, blend: false, dispose: false, fill: (x, y) => [10 * x, 200, 10 * y, 40 + 20 * ((x + y) % 5)] },
+    { x: 20, y: 14, w: 6, h: 5, duration: 0, blend: true, dispose: false, fill: (x) => [255, 255, (x * 40) % 256, 255] },
+  ],
+};
+
+/** Frames given to libwebp's own animation encoder for webp-libwebp.webp (it picks blend, dispose and rectangles). */
+export function webpLibwebpFrames() {
+  const W = 24;
+  const H = 16;
+  const frames = [];
+  for (let t = 0; t < 4; t++) {
+    const d = new Uint8Array(W * H * 4);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const inSquare = x >= 2 + t * 4 && x < 8 + t * 4 && y >= 4 && y < 10;
+        const px = inSquare ? [240, 40 * t, 30, 255] : [x * 10, y * 12, 90, y < 3 ? 0 : y < 6 ? 128 : 255];
+        d.set(px, (y * W + x) * 4);
+      }
+    frames.push(d);
+  }
+  return { width: W, height: H, frames };
+}

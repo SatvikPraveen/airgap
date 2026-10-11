@@ -28,6 +28,8 @@
  *   rgba-partial.qoi    64x48  QOI with alpha, written by the reference encoder (qoi.h via @jsquash/qoi)
  *   apng-ops.png        32x24  APNG, 4 frames: every dispose_op and blend_op, sub-rectangles, mixed delays, 3 plays
  *   apng-hidden.png     16x16  APNG whose IDAT still image is not a frame, 2 frames in fdAT, loops forever
+ *   webp-ops.webp       32x24  animated WebP built by hand: blend and dispose, semi-transparent blending (WEBP_OPS)
+ *   webp-libwebp.webp   24x16  animated WebP written by libwebp's own WebPAnimEncoder (wasm-webp), its own choices
  */
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -699,6 +701,54 @@ function apng({ width, height, plays, frames, hiddenDefault }) {
       ],
     }),
   );
+}
+
+// ---------------------------------------------------------------- animated WebP
+try {
+  const webpMeta = await import('@jsquash/webp/meta.js');
+  const { default: webpFactory } = await import('@jsquash/webp/codec/enc/webp_enc.js');
+  const enc = await emscripten(webpFactory, '@jsquash/webp/codec/enc/webp_enc.wasm');
+  const opts = { ...webpMeta.defaultOptions, lossless: 1, exact: 1, quality: 100 };
+  const le = (n, v) => {
+    const b = Buffer.alloc(n);
+    for (let i = 0; i < n; i++) b[i] = (v >> (8 * i)) & 255;
+    return b;
+  };
+  const chunk = (type, data) => Buffer.concat([Buffer.from(type, 'ascii'), le(4, data.length), data, data.length & 1 ? Buffer.alloc(1) : Buffer.alloc(0)]);
+  const bitstream = (still) => {
+    const out = [];
+    for (let o = 12; o + 8 <= still.length; ) {
+      const t = Buffer.from(still.subarray(o, o + 4)).toString('ascii');
+      const n = still[o + 4] | (still[o + 5] << 8) | (still[o + 6] << 16) | (still[o + 7] << 24);
+      if (t === 'ALPH' || t === 'VP8 ' || t === 'VP8L') out.push(chunk(t, Buffer.from(still.subarray(o + 8, o + 8 + n))));
+      o += 8 + n + (n & 1);
+    }
+    return Buffer.concat(out);
+  };
+  const W = P.WEBP_OPS;
+  const anmfs = W.frames.map((f) => {
+    const rgba = raster8({ width: f.w, height: f.h }, f.fill);
+    const still = enc.encode(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.length), f.w, f.h, opts);
+    const head = Buffer.concat([le(3, f.x / 2), le(3, f.y / 2), le(3, f.w - 1), le(3, f.h - 1), le(3, f.duration), Buffer.from([(f.blend ? 0 : 2) | (f.dispose ? 1 : 0)])]);
+    return chunk('ANMF', Buffer.concat([head, bitstream(still)]));
+  });
+  const vp8x = Buffer.concat([Buffer.from([0x12, 0, 0, 0]), le(3, W.width - 1), le(3, W.height - 1)]);
+  const body = Buffer.concat([Buffer.from('WEBP', 'ascii'), chunk('VP8X', vp8x), chunk('ANIM', Buffer.concat([le(4, 0), le(2, W.loops)])), ...anmfs]);
+  write('webp-ops.webp', Buffer.concat([Buffer.from('RIFF', 'ascii'), le(4, body.length), body]));
+} catch (err) {
+  console.warn('animated WebP fixture skipped:', err.message);
+}
+try {
+  // libwebp's own animation encoder. (wasm-webp records a wrong duration for the last frame;
+  // the tests read durations from the file, so that does not matter for the fixture.)
+  const { default: factory } = await import('wasm-webp/dist/esm/webp-wasm.js');
+  const m = await factory({ wasmBinary: readFileSync(require.resolve('wasm-webp/dist/esm/webp-wasm.wasm')) });
+  const { width, height, frames } = P.webpLibwebpFrames();
+  const vec = new m.VectorWebPAnimationFrame();
+  frames.forEach((data, i) => vec.push_back({ data, duration: 80 + 10 * i, config: { lossless: 1, quality: 100 }, has_config: true }));
+  write('webp-libwebp.webp', m.encodeAnimation(width, height, true, vec));
+} catch (err) {
+  console.warn('libwebp animation fixture skipped:', err.message);
 }
 
 console.log('fixtures written to', out);
