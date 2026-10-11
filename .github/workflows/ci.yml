@@ -8,10 +8,10 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: typecheck, unit, browser, e2e
+  checks:
+    name: notices, typecheck, unit, build, budget
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -26,39 +26,62 @@ jobs:
 
       - run: npm run typecheck
 
-      # Playwright browsers are keyed on the exact Playwright version in the lockfile,
-      # so the ~100 MB download only happens when Playwright is upgraded. The OS
-      # dependencies are cheap and are installed every time.
-      - name: Read Playwright version
-        id: pw
-        run: echo "version=$(node -e "console.log(require('./package-lock.json').packages['node_modules/playwright'].version)")" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Playwright browsers
-        id: pw-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-
-      - name: Install Playwright Chromium (cache miss)
-        if: steps.pw-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-
-      - name: Install Playwright OS dependencies (cache hit)
-        if: steps.pw-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-
       - name: Unit tests (node)
         run: npm run test:unit
-
-      - name: Browser tests (real codecs in headless Chromium)
-        run: npm run test:browser
 
       - name: Production build
         run: npm run build
 
       - name: Bundle size budget
         run: npm run check:budget
+
+  # The same real-codec and end-to-end suites in each engine. A probe outcome that
+  # differs between engines is pinned in tests/browser/engine-matrix.test.ts, so a
+  # browser update that changes what can be demonstrated fails here, not in use.
+  engines:
+    name: browser + e2e (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      AIRGAP_BROWSERS: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Playwright browsers are keyed on the exact Playwright version in the lockfile and the
+      # engine, so each download only happens when Playwright is upgraded. The OS
+      # dependencies are cheap and are installed every time.
+      - name: Read Playwright version
+        id: pw
+        run: echo "version=$(node -e "console.log(require('./package-lock.json').packages['node_modules/playwright'].version)")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browser
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ matrix.browser }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Playwright ${{ matrix.browser }} (cache miss)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Install Playwright OS dependencies (cache hit)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps ${{ matrix.browser }}
+
+      - name: Browser tests (real codecs)
+        run: npm run test:browser
 
       - name: End-to-end tests (production build, privacy trap)
         run: npm run test:e2e
@@ -67,7 +90,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.browser }}
           path: |
             playwright-report
             test-results

@@ -73,10 +73,14 @@ Most converters silently destroy data. Airgap:
    - A meta-tag CSP applies to the document, and a dedicated worker started
      from a same-origin URL takes its policy from HTTP response headers that
      GitHub Pages does not send. Airgap therefore starts its worker from a
-     `blob:` URL (`worker-src blob:`), and a blob worker inherits the page's
-     policy. Verified in Chromium: inside the blob worker, `fetch()` of both
-     cross-origin and same-origin URLs raises a `connect-src` violation and no
-     request is made.
+     `blob:` URL, and a blob worker inherits the page's policy. Verified in
+     Chromium, Firefox and WebKit by the e2e suite: a fetch inside a blob
+     worker is refused and no request is made, and every worker the page
+     starts has a blob: URL. `worker-src` is `blob: 'self'`. The `'self'` is
+     there for Firefox, which checks the codec chunks the worker imports
+     against `worker-src` (Chromium and WebKit check them against
+     `script-src`). It admits only this site's own files, never another
+     origin.
    - `script-src` includes `'wasm-unsafe-eval'`. This keyword lets the browser
      compile WebAssembly, which the image codecs are. It does **not** enable
      JavaScript `eval()` or `new Function()` (that would be `'unsafe-eval'`,
@@ -118,7 +122,7 @@ Most converters silently destroy data. Airgap:
    grep index.html checksums.txt
    ```
 
-## What is provably lossless (Chromium, measured by the test suites)
+## What is provably lossless (measured by the test suites in Chromium, Firefox and WebKit)
 
 Exact means every sample of every pixel, R, G, B and A, including RGB stored
 under alpha 0, compared with a plain `===` after decoding the output again.
@@ -329,6 +333,29 @@ the compare view offers **Output**, **Source**, **Changed pixels** and
 from the same comparison (log scale: yellow marks a difference of 1, red the
 largest); it is disabled, and says so, when the output is identical.
 
+## Three engines, measured
+
+The real-codec suite and the end-to-end suite run in Chromium, Firefox and
+WebKit (Safari's engine), one CI job each; a failure in any engine blocks the
+deployment. The codecs are WebAssembly, so the lossless matrix above holds in
+all three. Where an engine differs, the difference is measured, pinned in
+`tests/browser/engine-matrix.test.ts`, and reported by the app itself:
+
+| Engine | What differs | What the app does |
+| --- | --- | --- |
+| WebKit | its JPEG decoder (ImageIO) rounds differently from libjpeg-turbo, so mozjpeg's decoder cannot be cross-checked | JPEG sources carry a `decoder-unverified` pixel loss |
+| WebKit | the canvas cannot encode WebP (it returns PNG) | the canvas WebP fallback reports itself unavailable |
+| Firefox | the premultiplied canvas never settles: semi-transparent pixels re-round on every pass | nothing (only the canvas fallback is affected, and it already declares inexact alpha) |
+| Firefox | worker imports are checked against `worker-src` | the CSP allows `'self'` there (see above) |
+
+One test is skipped in one engine: Firefox's `ClipboardEvent` constructor
+empties the clipboard data it is given, so a synthetic paste cannot carry a
+file there. Real pastes go through the same handler.
+
+Locally, `AIRGAP_BROWSERS=chromium,firefox,webkit npm test` and
+`AIRGAP_BROWSERS=... npm run test:e2e` run any subset; the default is
+Chromium.
+
 ## Live quality preview
 
 For a lossy target (JPEG, lossy WebP, AVIF or JPEG XL), a line under the
@@ -487,7 +514,7 @@ Node 20+ and npm.
 
 ```sh
 npm install
-npx playwright install chromium   # once; needed by the browser + e2e tests
+npx playwright install chromium   # once; needed by the browser + e2e tests (add firefox webkit for all engines)
 npm run dev            # local dev server (relaxes ONLY connect-src/style-src/worker-src for HMR)
 npm run build          # notices check + typecheck + production build to dist/ (base /airgap/) + checksums.txt
 npm run preview        # serve dist/ at http://localhost:4173/airgap/
