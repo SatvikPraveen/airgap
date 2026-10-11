@@ -1,6 +1,6 @@
 # Reproducible single-threaded WebAssembly build of libjxl for Airgap.
 # Everything is pinned: the emsdk image (by tag; record its digest in BUILD.md) and the libjxl tag.
-FROM emscripten/emsdk:5.0.7
+FROM emscripten/emsdk:6.0.11
 RUN apt-get update && apt-get install -y --no-install-recommends git cmake ninja-build python3 && rm -rf /var/lib/apt/lists/*
 ARG LIBJXL_TAG=v0.12.0
 RUN git clone --depth 1 --branch ${LIBJXL_TAG} --recurse-submodules --shallow-submodules https://github.com/libjxl/libjxl.git /src/libjxl
