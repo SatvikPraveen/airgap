@@ -401,6 +401,8 @@ export function mountApp(root: HTMLElement): AppHandle {
 
   // ---- render ----------------------------------------------------------------
 
+  let renderedResult: { result: AppState['result']; el: HTMLElement } | null = null;
+
   function render(): void {
     root.setAttribute('aria-busy', String(!state.ready || state.busy !== 'idle'));
     document.documentElement.toggleAttribute('data-ready', state.ready);
@@ -516,11 +518,20 @@ export function mountApp(root: HTMLElement): AppHandle {
             ? ''
             : 'Starting the conversion worker…';
 
-    clear(resultHost);
     const batchDone = !!state.batch && state.batch.items.some((it) => it.output);
     resultSection.hidden = !state.result && !batchDone;
-    if (state.result) resultHost.append(renderResult(state.result));
-    else if (state.batch && batchDone) resultHost.append(renderBatchResult(state.batch));
+    if (state.result) {
+      // The result panel holds interactive state (compare tab, zoom, wipe). Renders also come
+      // from asynchronous events such as a preview landing, so rebuild it only for a new result.
+      if (renderedResult?.result !== state.result) {
+        renderedResult = { result: state.result, el: renderResult(state.result) };
+        resultHost.replaceChildren(renderedResult.el);
+      }
+    } else {
+      renderedResult = null;
+      clear(resultHost);
+      if (state.batch && batchDone) resultHost.append(renderBatchResult(state.batch));
+    }
   }
 
   /**

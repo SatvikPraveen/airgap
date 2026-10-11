@@ -112,3 +112,18 @@ test('a large source previews on demand only', async ({ page }) => {
   await expect(page.getByTestId('preview-run')).toHaveText('Preview at quality 30');
   await expect(page.getByTestId('preview-stat')).toHaveAttribute('data-fresh', 'false');
 });
+
+test('a preview landing after Convert does not reset the result compare view', async ({ page }) => {
+  await pickFixture(page, 'rgb8.png');
+  await selectTarget(page, 'jpeg');
+  await expect(page.getByTestId('preview-summary')).toContainText(/^Quality 90: /, { timeout: 30_000 });
+  await page.getByTestId('convert').click();
+  await expect(page.getByTestId('verification')).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('compare-source').click();
+  await expect(page.getByTestId('compare-img-source')).toBeVisible();
+  // A slider move re-renders the app twice (busy, then result) while the result stays the same.
+  await page.getByTestId('quality').fill('30');
+  await expect(page.getByTestId('preview-summary')).toContainText(/^Quality 30: /, { timeout: 30_000 });
+  await expect(page.getByTestId('compare-source')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('compare-img-source')).toBeVisible();
+});
