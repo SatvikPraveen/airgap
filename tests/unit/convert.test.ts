@@ -366,3 +366,41 @@ describe('convert(): geometric edits', () => {
     expect(r.verification.comparedAgainstTransformed).toBe(true);
   });
 });
+
+describe('convert(): optional optimiser (verified, kept only when identical and smaller)', () => {
+  const px = () => pixelsFrom([9, 8, 7, 0, 1, 2, 3, 255, 5, 5, 5, 128, 200, 100, 50, 255], 2, 2);
+  const src = () => img(px(), { hasAlpha: true, hasTransparency: true, hasSemiTransparency: true });
+  const run = (optimizer: (b: Uint8Array) => Promise<Uint8Array>, optimize = true) => {
+    const c = fakeCodec('png');
+    return convert({ ...pipe(c), optimizer: { id: 'fake-opt', run: optimizer } }, src(), 'png', { target: target('png'), optimize });
+  };
+  // The fake container cannot be made smaller without changing samples; the 'kept' path is exercised
+  // with real oxipng in tests/browser/wasm-codecs.test.ts and the e2e suite.
+  it('identical but not smaller: not used, says why', async () => {
+    const r = await run(async (b) => b.slice(0, b.length)); // same bytes: not smaller
+    expect(r.optimization).toMatchObject({ tool: 'fake-opt', used: false, reason: 'it did not make the file smaller' });
+    expect(r.verification.identical).toBe(true);
+  });
+  it('different samples: not used, says why, and the writer output is kept', async () => {
+    const r = await run(async (b) => {
+      const c = b.slice(0, b.length - 1);
+      c[c.length - 4]! ^= 1; // flip a sample in the last pixel, one byte shorter overall
+      return c;
+    });
+    expect(r.optimization).toMatchObject({ used: false, reason: 'its output decoded to different samples' });
+    expect(r.verification.identical).toBe(true);
+  });
+  it('a failing optimiser is reported and harmless', async () => {
+    const r = await run(async () => {
+      throw new Error('boom');
+    });
+    expect(r.optimization).toMatchObject({ used: false, reason: 'it failed: boom' });
+    expect(r.verification.identical).toBe(true);
+  });
+  it('without the plan flag the optimiser never runs', async () => {
+    let calls = 0;
+    const r = await run(async (b) => (calls++, b), false);
+    expect(calls).toBe(0);
+    expect(r.optimization).toBeUndefined();
+  });
+});

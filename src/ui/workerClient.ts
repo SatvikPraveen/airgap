@@ -5,7 +5,7 @@
  * app then re-probes codecs on demand and reloads the current source.
  */
 import type { CapabilityTable, ImageFormat } from '../codecs/types';
-import type { ConversionPlan, Verification } from '../convert';
+import type { ConversionPlan, Optimization, Verification } from '../convert';
 import type { ConvertedPayload, FromWorker, SourceInfo, ToWorker } from '../protocol';
 import BootWorker from '../worker-boot.ts?worker&inline';
 import workerModuleUrl from '../worker.ts?worker&url';
@@ -19,6 +19,7 @@ export interface ConvertedMessage {
   colorLayout?: string;
   width: number;
   height: number;
+  optimization?: Optimization;
   verification: Verification;
   diffMask?: Uint8Array;
 }
@@ -43,6 +44,7 @@ function toMessage(m: ConvertedPayload): ConvertedMessage {
     ...(m.colorLayout && { colorLayout: m.colorLayout }),
     width: m.width,
     height: m.height,
+    ...(m.optimization && { optimization: m.optimization }),
     verification: m.verification,
     ...(m.diffMask && { diffMask: new Uint8Array(m.diffMask) }),
   };

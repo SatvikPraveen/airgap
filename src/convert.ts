@@ -21,6 +21,17 @@ export interface ConversionPlan {
   background?: RGB;
   /** Crop, rotate/mirror, resize; applied to the upright source before encoding. */
   transform?: TransformSpec;
+  /** PNG only: run the optimiser on the encoder's output and keep it if it is verified and smaller. */
+  optimize?: boolean;
+}
+
+/** What the optional optimiser did. `used` is false when its output was not kept, with the reason. */
+export interface Optimization {
+  tool: string;
+  before: number;
+  after: number;
+  used: boolean;
+  reason?: string;
 }
 
 export type MetadataOutcome = 'kept' | 'removed' | 'absent' | 'unexpected';
@@ -50,6 +61,7 @@ export interface ConversionResult {
   /** Output geometry (differs from the source after crop, rotation or resize). */
   width: number;
   height: number;
+  optimization?: Optimization;
   verification: Verification;
   /** width*height bytes, change magnitude per pixel (0 = identical). Only when the output is not identical. */
   diffMask?: Uint8Array;
@@ -72,6 +84,8 @@ export interface Pipeline {
   decoderCaps: CodecCapabilities;
   /** Decoder used to re-read the output for verification. */
   verifier: Codec;
+  /** Optional lossless re-packer of the encoder's output (oxipng for PNG). */
+  optimizer?: { id: string; run(bytes: Uint8Array): Promise<Uint8Array> };
 }
 
 export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: ImageFormat, plan: ConversionPlan): Promise<ConversionResult> {
@@ -133,7 +147,7 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   // Ask for what the user asked for. If the encoder's lossless claim failed its probe the
   // loss list already says so and the verification below measures the real outcome.
   const lossless = target.lossless;
-  const bytes = await p.encoder.encode(
+  let bytes = await p.encoder.encode(
     { pixels, metadata },
     {
       lossless,
@@ -143,6 +157,26 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
       ...(xmpOut && { xmp: xmpOut }),
     },
   );
+
+  // 4b. Optional optimiser: keep its output only if it decodes to the very same samples, carries the
+  // same metadata, and is smaller. Otherwise the encoder's bytes stand and the result says why.
+  let optimization: Optimization | undefined;
+  if (plan.optimize && p.optimizer) {
+    const before = bytes.length;
+    try {
+      const candidate = await p.optimizer.run(bytes);
+      const [a, b] = await Promise.all([p.verifier.decode(bytes), p.verifier.decode(candidate)]);
+      const same = a.pixels.bitDepth === b.pixels.bitDepth && comparePixels(a.pixels, b.pixels).identical;
+      const ha = inspect(bytes).metadata;
+      const hb = inspect(candidate).metadata;
+      const metaSame = ha.hasExif === hb.hasExif && ha.hasIcc === hb.hasIcc && ha.hasXmp === hb.hasXmp;
+      const reason = !same ? 'its output decoded to different samples' : !metaSame ? 'its output dropped or added metadata' : candidate.length >= before ? 'it did not make the file smaller' : undefined;
+      optimization = { tool: p.optimizer.id, before, after: candidate.length, used: !reason, ...(reason && { reason }) };
+      if (!reason) bytes = candidate;
+    } catch (err) {
+      optimization = { tool: p.optimizer.id, before, after: before, used: false, reason: `it failed: ${(err as Error).message}` };
+    }
+  }
 
   // 5. Verify pixels by decoding what we just produced.
   const back = await p.verifier.decode(bytes);
@@ -187,6 +221,7 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
     ...(h.colorLayout && { colorLayout: h.colorLayout }),
     width: pixels.width,
     height: pixels.height,
+    ...(optimization && { optimization }),
     verification,
     ...(mask && { diffMask: mask }),
   };

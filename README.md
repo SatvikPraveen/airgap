@@ -424,6 +424,19 @@ cannot carry EXIF, ICC or XMP, and the loss list says so when you ask to
 preserve them. A file declaring QOI's "all channels linear" colourspace gets
 the same colour-description warning as any other non-sRGB source.
 
+## Optimise PNG further (oxipng)
+
+For a PNG target, an optional step runs [oxipng](https://github.com/shssoichiro/oxipng)
+(single-threaded WebAssembly, preset 2) on the writer's output. oxipng only
+changes how the PNG is stored: filters, deflate, colour type, bit depth. Its
+`optimize_alpha` option, which would rewrite the colour under fully
+transparent pixels, is never enabled. The pipeline does not trust it. Its
+output is decoded again and kept only if every sample is identical, the same
+EXIF, ICC and XMP blocks are present, and the file is smaller. Otherwise the
+writer's file stands and the result panel says why. When it is kept, the
+result shows the size before and after. The normal verification then runs on
+the final bytes as always.
+
 ## Crop, rotate, mirror, resize
 
 The **Transform** fieldset edits geometry before encoding, in a fixed order:

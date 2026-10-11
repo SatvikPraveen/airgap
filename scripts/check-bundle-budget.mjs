@@ -14,7 +14,7 @@ const KB = 1024;
 const BUDGET = {
   'first-paint': 48 * KB, // index.html + css + main js (includes the inline bootstrap worker)
   worker: 80 * KB, // registry, pipeline, metadata layer, pako, own PNG/TIFF writers
-  png: 160 * KB,
+  png: 300 * KB, // Rust PNG decoder + oxipng (optional, loaded only when 'Optimise further' is used)
   mozjpeg: 260 * KB,
   jpeg: 8 * KB,
   webp: 320 * KB,

@@ -92,8 +92,9 @@ async function runPipeline(id: number, plan: Plan, isCurrent: () => boolean = ()
   // Codec loading yields to the event loop; a newer request may have arrived meanwhile.
   if (!isCurrent()) return null;
   const dec = registry.table()[entry.format]?.decode;
+  const optimizer = plan.optimize && plan.target.format === 'png' ? { id: 'oxipng', run: (b: Uint8Array) => import('./codecs/oxipng').then((m) => m.optimisePng(b)) } : undefined;
   const result = await convert(
-    { encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: dec?.capabilities ?? ver.resolved.capabilities, verifier: ver.codec },
+    { encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: dec?.capabilities ?? ver.resolved.capabilities, verifier: ver.codec, ...(optimizer && { optimizer }) },
     entry.decoded,
     entry.format,
     plan,
@@ -109,6 +110,7 @@ async function runPipeline(id: number, plan: Plan, isCurrent: () => boolean = ()
     ...(result.colorLayout && { colorLayout: result.colorLayout }),
     width: result.width,
     height: result.height,
+    ...(result.optimization && { optimization: result.optimization }),
     verification: result.verification,
     ...(mask && { diffMask: mask }),
   };

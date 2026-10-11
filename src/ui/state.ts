@@ -1,5 +1,5 @@
 import type { CapabilityTable, ImageFormat } from '../codecs/types';
-import type { Verification } from '../convert';
+import type { Optimization, Verification } from '../convert';
 import type { SourceInfo } from '../protocol';
 import type { IccMode, MetadataMode } from '../capabilities';
 import type { CropRect, Rotation } from '../transform';
@@ -81,6 +81,7 @@ export interface ConversionOutput {
   sourceUrl: string;
   /** The output geometry differs from the source (crop, rotation, resize): source and wipe views do not line up. */
   geometryChanged: boolean;
+  optimization?: Optimization;
 }
 
 /** A quality preview: the real pipeline at the current settings, shown without producing a result. */
@@ -162,6 +163,8 @@ export interface AppState {
   /** Above the auto-preview size the user runs previews one at a time; this is the plan key they asked for. */
   previewArmedKey: string | null;
   transform: TransformState;
+  /** PNG target: run oxipng after the writer (kept only when verified identical and smaller). */
+  optimizePng: boolean;
 }
 
 export function initialState(): AppState {
@@ -189,5 +192,6 @@ export function initialState(): AppState {
     previewCompareOpen: false,
     previewArmedKey: null,
     transform: initialTransform(),
+    optimizePng: false,
   };
 }

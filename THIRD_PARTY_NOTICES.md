@@ -21,6 +21,7 @@ terms.
 | [Emscripten](https://emscripten.org/) runtime | JavaScript glue generated for the C/C++ codecs | MIT | `licenses/emscripten.txt` |
 | [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) runtime | JavaScript glue generated for the Rust PNG codec and for jxl-oxide | MIT or Apache-2.0 | `licenses/png-crate-and-wasm-bindgen.txt` |
 | `jxl-oxide-wasm` by Wonwoo Choi | packaging and bindings of jxl-oxide (below) | MIT or Apache-2.0 | `licenses/jxl-oxide-and-deps.txt` |
+| `@jsquash/oxipng` by Jamie Sinclair | packaging of oxipng (below), single-threaded build only | Apache-2.0 | `licenses/Apache-2.0.txt` |
 
 ## Codecs compiled to WebAssembly
 
@@ -36,6 +37,7 @@ terms.
 | [Brotli](https://github.com/google/brotli) by the Brotli Authors | entropy coding inside libjxl | MIT | `licenses/libjxl-and-deps.txt` |
 | Rust [`png`](https://github.com/image-rs/image-png) crate and dependencies by the image-rs contributors | PNG decode (8 and 16-bit) | MIT or Apache-2.0 | `licenses/png-crate-and-wasm-bindgen.txt` |
 | [jxl-oxide](https://github.com/tirr-c/jxl-oxide) by Wonwoo Choi and contributors, a JPEG XL decoder written from the specification, with the `png`, `fdeflate`, `flate2`, `miniz_oxide`, `once_cell` and `tracing-core` crates | JPEG XL decode, and verification of JPEG XL output (shares no code with libjxl) | MIT or Apache-2.0 (`tracing-core`: MIT; `miniz_oxide`: also Zlib) | `licenses/jxl-oxide-and-deps.txt`, `licenses/Apache-2.0.txt` |
+| [oxipng](https://github.com/shssoichiro/oxipng) by Joshua Holmer and contributors, with [libdeflate](https://github.com/ebiggers/libdeflate) by Eric Biggers and the `libdeflater`, `bitvec`, `funty`, `radium`, `tap`, `wyz`, `rgb`, `indexmap`, `equivalent`, `hashbrown`, `log` and `rustc-hash` crates | optional lossless re-packing of PNG output | MIT; libdeflater: Apache-2.0; several crates MIT or Apache-2.0 | `licenses/oxipng-and-deps.txt`, `licenses/Apache-2.0.txt` |
 | [brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) by Dropbox, Inc. | Brotli-compressed metadata boxes inside jxl-oxide | BSD-3-Clause or MIT | `licenses/jxl-oxide-and-deps.txt` |
 
 ## Pure JavaScript libraries

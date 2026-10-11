@@ -61,6 +61,18 @@ export function renderResult(r: ConversionOutput): HTMLElement {
         { class: 'facts' },
         h('dt', {}, 'Output'),
         h('dd', { 'data-testid': 'result-format' }, `${label(r.format)} · ${r.bitDepth}-bit · ${formatBytes(r.size)} · ${r.encoderId}`),
+        ...(r.optimization
+          ? [
+              h('dt', {}, 'Optimised'),
+              h(
+                'dd',
+                { 'data-testid': 'result-optimization', 'data-used': String(r.optimization.used) },
+                r.optimization.used
+                  ? `${r.optimization.tool}: ${formatBytes(r.optimization.before)} → ${formatBytes(r.optimization.after)} (−${(100 * (1 - r.optimization.after / r.optimization.before)).toFixed(1)}%), decoded again and identical`
+                  : `${r.optimization.tool} output not used: ${r.optimization.reason}. The writer's ${formatBytes(r.optimization.before)} file is kept.`,
+              ),
+            ]
+          : []),
         h('dt', {}, 'Size'),
         h('dd', { 'data-testid': 'result-size' }, `${r.width} × ${r.height} px`),
         ...(r.colorLayout ? [h('dt', {}, 'Stored as'), h('dd', { 'data-testid': 'result-layout' }, r.colorLayout)] : []),

@@ -1,6 +1,6 @@
 /** Messages between the UI thread and the conversion worker. */
 import type { CapabilityTable, ImageFormat, ImageMetadata, ResolvedCodec } from './codecs/types';
-import type { ConversionPlan, Verification } from './convert';
+import type { ConversionPlan, Optimization, Verification } from './convert';
 import type { ExifSummary } from './metadata/exif';
 import type { ExifTagRow } from './metadata/exif-list';
 
@@ -45,6 +45,7 @@ export interface ConvertedPayload {
   /** Output geometry: differs from the source after a crop, rotation or resize. */
   width: number;
   height: number;
+  optimization?: Optimization;
   verification: Verification;
   /** width*height bytes; present only when the output is not identical. Transferred. */
   diffMask?: ArrayBuffer;

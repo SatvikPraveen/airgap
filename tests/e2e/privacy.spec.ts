@@ -60,6 +60,9 @@ test('lazy codec loading only ever requests the build\'s own asset files by exac
   for (const key of ['png', 'webp-lossless', 'avif-lossless', 'jxl-lossy', 'tiff', 'jpeg']) await selectTarget(page, key);
   await selectTarget(page, 'avif-lossless');
   await convertAndDownload(page);
+  await selectTarget(page, 'png');
+  await page.getByTestId('optimize-png').check(); // lazily loads oxipng too
+  await convertAndDownload(page);
   const assets = builtAssetNames();
   expect(trap.seen.length).toBeGreaterThan(3); // codecs really did load lazily
   for (const line of trap.seen) {

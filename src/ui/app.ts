@@ -117,6 +117,17 @@ export function mountApp(root: HTMLElement): AppHandle {
     previewHost,
   );
   quality.id = 'quality';
+  const optimizeInput = h('input', { type: 'checkbox', 'data-testid': 'optimize-png' });
+  const optimizeField = h(
+    'label',
+    { class: 'check', 'data-testid': 'optimize-field' },
+    optimizeInput,
+    h('span', {}, h('strong', {}, 'Optimise further with oxipng'), h('div', { class: 'hint' }, 'Slower. Re-packs the PNG losslessly; its output is decoded again and kept only if every sample and every metadata block is unchanged and the file is smaller.')),
+  );
+  optimizeInput.addEventListener('change', () => {
+    state.optimizePng = optimizeInput.checked;
+    render();
+  });
   const background = h('input', { type: 'color', 'data-testid': 'background' });
   const backgroundHex = h('code', { 'data-testid': 'background-hex' });
   const backgroundField = h(
@@ -266,6 +277,7 @@ export function mountApp(root: HTMLElement): AppHandle {
           ),
         ),
         qualityField,
+        optimizeField,
         backgroundField,
         transformPanel.el,
         metadataField,
@@ -397,6 +409,7 @@ export function mountApp(root: HTMLElement): AppHandle {
       quality: state.quality / 100,
       ...(flatten ? { background: parseHexColor(state.background) } : {}),
       ...(transform && { transform }),
+      ...(state.optimizePng && TARGETS[state.target].format === 'png' && { optimize: true }),
     };
   }
 
@@ -483,6 +496,8 @@ export function mountApp(root: HTMLElement): AppHandle {
 
     const lossyTarget = !current.lossless || (enc ? !enc.lossless : false);
     qualityField.hidden = !lossyTarget;
+    optimizeField.hidden = current.format !== 'png';
+    optimizeInput.checked = state.optimizePng;
     quality.value = String(state.quality);
     qualityValue.textContent = String(state.quality);
     renderPreviewSection(lossyTarget);
@@ -883,6 +898,7 @@ export function mountApp(root: HTMLElement): AppHandle {
         ...(out.diffMask && { diffMask: out.diffMask }),
         sourceUrl: src.previewUrl,
         geometryChanged: out.verification.comparedAgainstTransformed,
+        ...(out.optimization && { optimization: out.optimization }),
       };
     } catch (err) {
       if (!(err instanceof WorkerCancelledError)) state.error = (err as Error).message;

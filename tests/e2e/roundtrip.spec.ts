@@ -219,3 +219,19 @@ test('QOI source (reference encoder) -> PNG is exact; EXIF from a JPEG into QOI 
   await page.getByTestId('meta-preserve').check();
   await expect(page.locator('[data-loss="exif"]')).toContainText('cannot embed');
 });
+
+test('PNG + oxipng: the optimised download decodes identically (pngjs) and the result reports what oxipng did', async ({ page }) => {
+  await pickFixture(page, 'rgba-partial.png');
+  await selectTarget(page, 'png');
+  const plain = await convertAndDownload(page);
+  await page.getByTestId('optimize-png').check();
+  const packed = await convertAndDownload(page);
+  assertPixelIdentical(decodePngNode(fixture('rgba-partial.png')), decodePngNode(packed.bytes));
+  expect(packed.bytes.length).toBeLessThanOrEqual(plain.bytes.length);
+  const line = page.getByTestId('result-optimization');
+  await expect(line).toContainText('oxipng');
+  if ((await line.getAttribute('data-used')) === 'true') await expect(line).toContainText('decoded again and identical');
+  else await expect(line).toContainText('output not used');
+  await selectTarget(page, 'webp-lossless');
+  await expect(page.getByTestId('optimize-field')).toBeHidden();
+});

@@ -1,0 +1,74 @@
+oxipng and the code compiled into its WebAssembly build
+========================================================
+
+Airgap's optional "optimise PNG further" step uses oxipng 9.1.1 (by Joshua
+Holmer and contributors), compiled single-threaded to WebAssembly by the
+@jsquash/oxipng package. The binary also contains:
+
+  libdeflate (C, by Eric Biggers)            MIT
+  libdeflater 1.20.0, libdeflate-sys 1.20.0  Apache-2.0 (Adam Kewley)
+  bitvec 1.0.1, funty 2.0.0, wyz 0.5.1       MIT (myrrlyn / Alexander Payne)
+  radium 0.7.0 (Nika Layzell)                MIT
+  tap 1.0.1 (Elliot Linder)                  MIT
+  rgb 0.8.37 (Kornel Lesinski)               MIT
+  indexmap 2.2.6, equivalent 1.0.1           MIT or Apache-2.0
+  hashbrown 0.14.5 (Amanieu d'Antras)        MIT or Apache-2.0
+  log 0.4.21, rustc-hash 1.1.0               MIT or Apache-2.0 (The Rust Project Developers)
+  wasm-bindgen                               MIT or Apache-2.0
+
+The Apache-2.0 components (and the Apache alternative of the dual-licensed
+ones) are covered by licenses/Apache-2.0.txt. The MIT text follows, with the
+copyright lines of every MIT component, then libdeflate's licence verbatim.
+
+---------------------------------------------------------------------- MIT
+
+Copyright (c) 2016 Joshua Holmer (oxipng)
+Copyright (c) 2018 myrrlyn (Alexander Payne) (bitvec, wyz)
+Copyright (c) 2020 myrrlyn (Alexander Payne) (funty)
+Copyright (c) 2019 kneecaw (Nika Layzell) (radium)
+Copyright (c) 2017 Elliot Linder <darfink@gmail.com> (tap)
+Copyright (c) 2019 Kornel (rgb)
+Copyright (c) the indexmap, equivalent and hashbrown authors
+Copyright (c) The Rust Project Developers (log, rustc-hash)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------- libdeflate (COPYING)
+
+Copyright 2016 Eric Biggers
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation files
+(the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of the Software,
+and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

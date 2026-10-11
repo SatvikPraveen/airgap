@@ -13,6 +13,7 @@ import { createWasmAvifCodec } from '../../src/codecs/wasm/avif';
 import { createWasmJpegCodec } from '../../src/codecs/wasm/jpeg';
 import { createWasmJxlCodec } from '../../src/codecs/wasm/jxl';
 import { createJxlOxideCodec } from '../../src/codecs/wasm/jxl-oxide';
+import { optimisePng } from '../../src/codecs/oxipng';
 import { createAirgapPngCodec, createWasmPngCodec } from '../../src/codecs/wasm/png';
 import { createWasmWebpCodec } from '../../src/codecs/wasm/webp';
 import { inspect } from '../../src/inspect';
@@ -240,5 +241,34 @@ describe('canvas fallback cross-check', () => {
       const cv = await createCanvasCodec(name).decode(bytes);
       expect(firstMismatch(convertBitDepth(cv.pixels, 8).data, src.data), name).toBeNull();
     }
+  });
+});
+
+describe('oxipng (optional PNG re-packing)', () => {
+  it('re-packs the writer output of the alpha pattern: smaller, identical over the full RGBA tuple (alpha-0 colour kept)', async () => {
+    const png = await codecs.png!;
+    const src = rgba8();
+    const written = await png.encode(asImage(src), { lossless: true });
+    const packed = await optimisePng(written);
+    expect(packed.length).toBeLessThanOrEqual(written.length);
+    const back = await png.decode(packed);
+    expect(firstMismatch(back.pixels.data, src.data)).toBeNull();
+  });
+  it('the pipeline keeps oxipng output only when verified, and reports the saving', async () => {
+    const { CodecRegistry } = await import('../../src/codecs/registry');
+    const { convert } = await import('../../src/convert');
+    const registry = new CodecRegistry();
+    const enc = await registry.resolve('png', 'encode');
+    const flat = rasterFrom({ width: 64, height: 64 }, (x, y) => [x < 32 ? 200 : 20, y < 32 ? 40 : 220, 90, 255]);
+    const r = await convert(
+      { encoder: enc.codec, encoderCaps: enc.resolved.capabilities, decoderCaps: enc.resolved.capabilities, verifier: enc.codec, optimizer: { id: 'oxipng', run: optimisePng } },
+      asImage(flat, { hasAlpha: false, hasTransparency: false, hasSemiTransparency: false }),
+      'png',
+      { target: { format: 'png', lossless: true, metadataMode: 'strip-all', iccMode: 'strip' }, optimize: true },
+    );
+    expect(r.verification.identical).toBe(true);
+    expect(r.optimization?.tool).toBe('oxipng');
+    if (r.optimization?.used) expect(r.optimization.after).toBeLessThan(r.optimization.before);
+    else expect(r.optimization?.reason).toBe('it did not make the file smaller');
   });
 });
