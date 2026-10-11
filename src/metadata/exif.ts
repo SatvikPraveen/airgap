@@ -167,6 +167,26 @@ export function setOrientation(tiff: Uint8Array, value: number): Uint8Array {
   return changed ? serializeExif(s) : tiff;
 }
 
+/**
+ * After a geometric edit: rewrites PixelXDimension / PixelYDimension (Exif IFD) to the
+ * output size where they exist, and removes IFD1 (the thumbnail), which would show the
+ * original framing. Everything else is kept.
+ */
+export function setExifGeometry(tiff: Uint8Array, width: number, height: number): Uint8Array {
+  const s = parseExif(tiff);
+  const exif = findEntry(s.ifd0, TAG.ExifIFD)?.sub;
+  if (exif) {
+    for (const [tag, v] of [[TAG.PixelXDimension, width], [TAG.PixelYDimension, height]] as const) {
+      const e = findEntry(exif, tag);
+      if (!e) continue;
+      // Keep SHORT when the value fits and the tag was SHORT; LONG otherwise (both are allowed).
+      setEntry(exif, e.type === 3 && v <= 0xffff ? entryShort(s.littleEndian, tag, [v]) : entryLong(s.littleEndian, tag, [v]));
+    }
+  }
+  delete s.ifd0.next;
+  return serializeExif(s);
+}
+
 /** Re-serialises through the parser: what a preserved payload will actually look like. */
 export function normalizeExif(tiff: Uint8Array): Uint8Array {
   return serializeExif(parseExif(tiff));

@@ -5,8 +5,10 @@
  * Codecs are never named: only capability fields go in.
  */
 import { describe, expect, it } from 'vitest';
+import type { TransformSpec } from '../../src/transform';
 import {
   computeLosses,
+  type Geometry,
   DEFAULT_MODES,
   isFullyLossless,
   isPixelLossless,
@@ -233,5 +235,53 @@ describe('helpers', () => {
   it('isFullyLossless only when the list is empty', () => {
     expect(isFullyLossless(computeLosses(sources['png rgb8']!, targets.png!, { decoder: DEC.png, encoder: ENC.png }))).toBe(true);
     expect(isFullyLossless(computeLosses(sources['jpeg exif+gps']!, targets.png!, { decoder: DEC.jpeg, encoder: ENC.png }))).toBe(false);
+  });
+});
+
+describe('geometric edits (crop, rotate/mirror, resize)', () => {
+  const plain = src('png', { sourceLossless: true });
+  const exifThumb = src('jpeg', { hasExif: true, hasThumbnail: true, orientation: 1 });
+  const t = (metadataMode: TargetSpec['metadataMode'] = 'strip-all'): TargetSpec => ({ format: 'png', lossless: true, metadataMode, iccMode: 'strip' });
+  const p = { decoder: caps(), encoder: caps() };
+  const g = (transform: TransformSpec): Geometry => ({ width: 100, height: 50, transform });
+
+  it('the identity transform lists nothing', () => {
+    expect(computeLosses(plain, t(), p, g({ rotate: 0, flipH: false, flipV: false, crop: { x: 0, y: 0, width: 100, height: 50 } }))).toEqual([]);
+  });
+  it('crop and rotate are GEOMETRY losses: listed with counts, and lossless-only still allows them', () => {
+    const l = computeLosses(plain, t(), p, g({ rotate: 90, flipH: false, flipV: false, crop: { x: 10, y: 5, width: 20, height: 10 } }));
+    expect(l.map((x) => [x.kind, x.severity])).toEqual([
+      ['crop', 'geometry'],
+      ['reorient', 'geometry'],
+    ]);
+    expect(l[0]!.message).toContain('4,800 of 5,000 pixels are removed');
+    expect(l[1]!.message).toContain('rotated 90° clockwise');
+    expect(isPixelLossless(l)).toBe(true);
+    expect(isFullyLossless(l)).toBe(false);
+  });
+  it('a 180° rotation expressed as two mirrors is still reported (as the mirrors the user chose)', () => {
+    const l = computeLosses(plain, t(), p, g({ rotate: 0, flipH: true, flipV: true }));
+    expect(l.map((x) => x.kind)).toEqual(['reorient']);
+    expect(l[0]!.message).toContain('mirrored left-right, then mirrored top-bottom');
+  });
+  it('resize is a PIXELS loss that trips lossless-only, says down/upscaled, and mentions alpha only with alpha', () => {
+    const down = computeLosses(plain, t(), p, g({ rotate: 0, flipH: false, flipV: false, resize: { width: 50, height: 25 } }));
+    expect(down.map((x) => [x.kind, x.severity])).toEqual([['resample', 'pixels']]);
+    expect(down[0]!.message).toMatch(/downscaled \(2\.00× fewer pixels per side\)/);
+    expect(down[0]!.message).not.toMatch(/premultiplied/);
+    expect(isPixelLossless(down)).toBe(false);
+    const up = computeLosses(src('png', { hasAlpha: true }), t(), p, g({ rotate: 0, flipH: false, flipV: false, resize: { width: 300, height: 150 } }));
+    expect(up[0]!.message).toMatch(/upscaled \(3\.00× per side/);
+    expect(up[0]!.message).toMatch(/premultiplied alpha/);
+  });
+  it('carried EXIF after an edit: dimensions rewritten, thumbnail removed; nothing when EXIF is stripped', () => {
+    const edit = g({ rotate: 180, flipH: false, flipV: false });
+    const kept = computeLosses(exifThumb, t('preserve'), p, edit);
+    expect(kept.map((x) => x.kind)).toEqual(['reorient', 'exif-geometry']);
+    expect(kept[1]!.message).toMatch(/thumbnail/);
+    const stripped = computeLosses(exifThumb, t('strip-all'), p, edit);
+    expect(stripped.map((x) => x.kind)).toEqual(['reorient', 'exif']);
+    const noThumb = computeLosses(src('jpeg', { hasExif: true, orientation: 1 }), t('preserve'), p, edit);
+    expect(noThumb[1]!.message).not.toMatch(/thumbnail/);
   });
 });

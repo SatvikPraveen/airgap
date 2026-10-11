@@ -8,6 +8,7 @@
  * tests/unit/capabilities.test.ts.
  */
 import type { CodecCapabilities, ColorDescription, ImageFormat, ImageMetadata } from './codecs/types';
+import { describeOrientation, isCropping, isIdentity, isResampling, orientationFor, orientedSize, type TransformSpec } from './transform';
 
 export interface SourceDescription {
   format: ImageFormat;
@@ -41,6 +42,10 @@ export type LossKind =
   | 'decoder-unverified' // the decoder for this source could not be shown to be exact
   | 'transform-properties' // AVIF irot/imir rotation-mirror properties are not applied
   | 'animation' // only the first frame / page survives
+  | 'crop' // pixels outside the crop rectangle removed on purpose; the rest copied exactly
+  | 'reorient' // rotated / mirrored on purpose; every value kept, positions change
+  | 'resample' // resized: every output value is interpolated
+  | 'exif-geometry' // EXIF pixel dimensions rewritten and the EXIF thumbnail removed after a geometric edit
   | 'icc-convert' // pixel values changed to sRGB on purpose (appearance kept)
   | 'icc-convert-unavailable' // convert requested but profile kind is not matrix/TRC
   | 'color-description' // CICP primaries/transfer (wide gamut, HDR) declared by the source cannot be carried
@@ -55,9 +60,17 @@ export type LossKind =
 
 /**
  * 'pixels'   — visible pixel values in the output differ from the source (or cannot be shown not to).
+ * 'geometry' — a geometric edit you asked for removes or moves pixels; every kept value is exact.
  * 'metadata' — pixel values survive; embedded metadata does not (or is altered).
  */
-export type LossSeverity = 'pixels' | 'metadata';
+export type LossSeverity = 'pixels' | 'geometry' | 'metadata';
+
+/** A geometric edit and the size of the (upright) image it applies to. */
+export interface Geometry {
+  width: number;
+  height: number;
+  transform: TransformSpec;
+}
 
 export interface Loss {
   kind: LossKind;
@@ -82,12 +95,16 @@ export function plannedBitDepth(sourceDepth: number, p: Pipeline): number {
  * Returns every loss the conversion will cause, in display order.
  * An empty list means: pixel-identical output AND no metadata dropped or altered.
  */
-export function computeLosses(source: SourceDescription, target: TargetSpec, p: Pipeline): Loss[] {
+export function computeLosses(source: SourceDescription, target: TargetSpec, p: Pipeline, geometry?: Geometry): Loss[] {
   const m = source.metadata;
   const enc = p.encoder;
   const dec = p.decoder;
   const losses: Loss[] = [];
   const name = label(target.format);
+  const edited = !!geometry && !isIdentity(geometry.width, geometry.height, geometry.transform);
+
+  // --- geometric edits the user asked for: listed first, they are the most visible change ---
+  if (geometry && edited) losses.push(...geometryLosses(geometry, m));
 
   // --- pixel-level losses first: they matter most ---------------------------
 
@@ -226,6 +243,14 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
 
   // --- metadata ---------------------------------------------------------------
 
+  if (edited && m.hasExif && target.metadataMode !== 'strip-all' && enc.metadata.exif) {
+    losses.push({
+      kind: 'exif-geometry',
+      severity: 'metadata',
+      message: `EXIF is carried, so its pixel-dimension tags are rewritten to the output size${m.hasThumbnail ? ', and the embedded EXIF thumbnail, which shows the original framing and orientation, is removed' : ''}.`,
+    });
+  }
+
   if (m.hasExif) {
     if (target.metadataMode === 'strip-all') {
       losses.push({
@@ -313,7 +338,40 @@ export function computeLosses(source: SourceDescription, target: TargetSpec, p: 
   return losses;
 }
 
-/** True when the conversion keeps every visible pixel value. Metadata losses do not count. */
+function geometryLosses(g: Geometry, m: ImageMetadata): Loss[] {
+  const t = g.transform;
+  const out: Loss[] = [];
+  if (isCropping(g.width, g.height, t)) {
+    const c = t.crop!;
+    const removed = g.width * g.height - c.width * c.height;
+    out.push({
+      kind: 'crop',
+      severity: 'geometry',
+      message: `Cropped to ${c.width} × ${c.height} px starting at (${c.x}, ${c.y}): ${removed.toLocaleString('en-US')} of ${(g.width * g.height).toLocaleString('en-US')} pixels are removed. Every pixel kept is copied exactly.`,
+    });
+  }
+  if (orientationFor(t) !== 1) {
+    out.push({
+      kind: 'reorient',
+      severity: 'geometry',
+      message: `The image is ${describeOrientation(t)}. Every pixel value is kept exactly; only positions change.`,
+    });
+  }
+  if (isResampling(g.width, g.height, t)) {
+    const from = orientedSize(g.width, g.height, t);
+    const to = t.resize!;
+    const factor = Math.sqrt((to.width * to.height) / (from.width * from.height));
+    const how = factor < 1 ? `downscaled (${(1 / factor).toFixed(2)}× fewer pixels per side)` : `upscaled (${factor.toFixed(2)}× per side; new pixels are interpolated, no detail is added)`;
+    out.push({
+      kind: 'resample',
+      severity: 'pixels',
+      message: `Resized from ${from.width} × ${from.height} to ${to.width} × ${to.height} px, ${how}, with a Lanczos-3 filter. Every output value is computed from its neighbours, so no pixel value can be called preserved. Filtering runs on the stored, gamma-encoded values, not linear light${m.hasAlpha ? ', and on premultiplied alpha to avoid edge fringing: the colour under fully transparent pixels becomes 0' : ''}.`,
+    });
+  }
+  return out;
+}
+
+/** True when the conversion keeps every visible pixel value. Metadata and geometric edits do not count. */
 export function isPixelLossless(losses: Loss[]): boolean {
   return !losses.some((l) => l.severity === 'pixels');
 }

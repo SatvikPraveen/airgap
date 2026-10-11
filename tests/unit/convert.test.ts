@@ -304,3 +304,56 @@ describe('probeCodec on fake codecs', () => {
     expect(canvasCaps('png').exactAlpha).toBe(false);
   });
 });
+
+describe('convert(): geometric edits', () => {
+  it('crop + rotate: output geometry changes, verification compares against the transformed image and is exact', async () => {
+    const c = fakeCodec('png');
+    const px = allocate(4, 2, 8);
+    for (let i = 0; i < px.data.length; i++) px.data[i] = (i * 37) & 255;
+    for (let i = 3; i < px.data.length; i += 4) px.data[i] = 255;
+    const r = await convert(pipe(c), img(px), 'png', { target: target('png'), transform: { rotate: 90, flipH: false, flipV: false, crop: { x: 1, y: 0, width: 3, height: 2 } } });
+    expect([r.width, r.height]).toEqual([2, 3]);
+    expect(r.verification.identical).toBe(true);
+    expect(r.verification.comparedAgainstTransformed).toBe(true);
+  });
+  it('the identity transform is not reported as a transform', async () => {
+    const c = fakeCodec('png');
+    const r = await convert(pipe(c), img(pixelsFrom([1, 2, 3, 255, 4, 5, 6, 255], 2, 1)), 'png', { target: target('png'), transform: { rotate: 0, flipH: false, flipV: false, crop: { x: 0, y: 0, width: 2, height: 1 } } });
+    expect(r.verification.comparedAgainstTransformed).toBe(false);
+    expect([r.width, r.height]).toEqual([2, 1]);
+  });
+  it('a crop that removes every transparent pixel updates the alpha facts the encoder sees', async () => {
+    let seen: DecodedImage['metadata'] | undefined;
+    const c = fakeCodec('png');
+    const enc = c.encode.bind(c);
+    c.encode = async (im, o) => {
+      seen = im.metadata;
+      return enc(im, o);
+    };
+    const src = img(pixelsFrom([1, 1, 1, 255, 2, 2, 2, 0], 2, 1), { hasAlpha: true, hasTransparency: true });
+    await convert(pipe(c), src, 'png', { target: target('png'), transform: { rotate: 0, flipH: false, flipV: false, crop: { x: 0, y: 0, width: 1, height: 1 } } });
+    expect(seen?.hasTransparency).toBe(false);
+  });
+  it('carried EXIF gets the output dimensions and loses its thumbnail; the orientation tag is still 1', async () => {
+    const c = fakeCodec('png');
+    const r = await convert(pipe(c), img(pixelsFrom(new Array(6 * 4).fill(200), 3, 2), { hasExif: true, hasGps: true, exif: EXIF, orientation: 1 }), 'png', {
+      target: target('png', true, { metadataMode: 'preserve' }),
+      transform: { rotate: 270, flipH: false, flipV: false },
+    });
+    expect([r.width, r.height]).toEqual([2, 3]);
+    const carried = c.calls[0]!.exif!;
+    const s = summarizeExif(carried);
+    expect(s.hasThumbnail).toBe(false);
+    expect(s.hasGps).toBe(true);
+    expect(r.verification.metadata.exif).toBe('kept');
+  });
+  it('resize changes values; the verification measures the encoder against the resampled image, not the source', async () => {
+    const c = fakeCodec('png');
+    const px = allocate(8, 8, 8);
+    for (let i = 0; i < px.data.length; i += 4) px.data.set([i & 255, 100, 50, 255], i);
+    const r = await convert(pipe(c), img(px), 'png', { target: target('png'), transform: { rotate: 0, flipH: false, flipV: false, resize: { width: 3, height: 5 } } });
+    expect([r.width, r.height]).toEqual([3, 5]);
+    expect(r.verification.identical).toBe(true); // lossless encoder of the resampled pixels
+    expect(r.verification.comparedAgainstTransformed).toBe(true);
+  });
+});

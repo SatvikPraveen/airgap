@@ -17,6 +17,8 @@ export interface ConvertedMessage {
   bitDepth: number;
   encoderId: string;
   colorLayout?: string;
+  width: number;
+  height: number;
   verification: Verification;
   diffMask?: Uint8Array;
 }
@@ -39,6 +41,8 @@ function toMessage(m: ConvertedPayload): ConvertedMessage {
     bitDepth: m.bitDepth,
     encoderId: m.encoderId,
     ...(m.colorLayout && { colorLayout: m.colorLayout }),
+    width: m.width,
+    height: m.height,
     verification: m.verification,
     ...(m.diffMask && { diffMask: new Uint8Array(m.diffMask) }),
   };

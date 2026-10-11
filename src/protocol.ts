@@ -42,6 +42,9 @@ export interface ConvertedPayload {
   bitDepth: number;
   encoderId: string;
   colorLayout?: string;
+  /** Output geometry: differs from the source after a crop, rotation or resize. */
+  width: number;
+  height: number;
   verification: Verification;
   /** width*height bytes; present only when the output is not identical. Transferred. */
   diffMask?: ArrayBuffer;

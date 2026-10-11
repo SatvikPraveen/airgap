@@ -64,6 +64,7 @@ async function load(id: number, buffer: ArrayBuffer): Promise<void> {
       info.exifSummary = summarizeExif(exif);
       info.metadata.hasMakerNote = info.exifSummary.hasMakerNote;
       info.metadata.thumbnailHasMetadata = info.exifSummary.thumbnailHasMetadata;
+      info.metadata.hasThumbnail = info.exifSummary.hasThumbnail;
       info.exifTags = listExifTags(exif);
     } catch {
       /* unreadable EXIF: facts from the header still stand */
@@ -106,6 +107,8 @@ async function runPipeline(id: number, plan: Plan, isCurrent: () => boolean = ()
     bitDepth: result.bitDepth,
     encoderId: result.encoderId,
     ...(result.colorLayout && { colorLayout: result.colorLayout }),
+    width: result.width,
+    height: result.height,
     verification: result.verification,
     ...(mask && { diffMask: mask }),
   };

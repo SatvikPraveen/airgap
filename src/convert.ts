@@ -7,10 +7,11 @@ import type { Codec, CodecCapabilities, DecodedImage, ImageFormat, PixelData } f
 import { MIME } from './codecs/types';
 import { flattenPixels, type RGB } from './flatten';
 import { inspect } from './inspect';
-import { setOrientation, stripGps, normalizeExif } from './metadata/exif';
+import { setExifGeometry, setOrientation, stripGps, normalizeExif } from './metadata/exif';
 import { convertToSrgb, parseIcc } from './metadata/icc';
 import { applyOrientation } from './orientation';
-import { comparePixels, convertBitDepth, diffMask, type PixelComparison } from './pixels';
+import { alphaStats, comparePixels, convertBitDepth, diffMask, type PixelComparison } from './pixels';
+import { applyTransform, isIdentity, type TransformSpec } from './transform';
 
 export interface ConversionPlan {
   target: TargetSpec;
@@ -18,6 +19,8 @@ export interface ConversionPlan {
   quality?: number;
   /** Required when the source has alpha and the target cannot store it. */
   background?: RGB;
+  /** Crop, rotate/mirror, resize; applied to the upright source before encoding. */
+  transform?: TransformSpec;
 }
 
 export type MetadataOutcome = 'kept' | 'removed' | 'absent' | 'unexpected';
@@ -29,6 +32,8 @@ export interface Verification extends PixelComparison {
   verifierId: string;
   comparedAgainstFlattened: boolean;
   comparedAgainstConverted: boolean;
+  /** The baseline is the source after the geometric edit (crop, rotate, resize). */
+  comparedAgainstTransformed: boolean;
   metadata: { exif: MetadataOutcome; gps: MetadataOutcome; icc: MetadataOutcome; xmp: MetadataOutcome };
   /** Every metadata outcome matched the plan. */
   metadataOk: boolean;
@@ -42,6 +47,9 @@ export interface ConversionResult {
   encoderId: string;
   /** How the container stores the samples (re-read from the output header), when the format exposes it. */
   colorLayout?: string;
+  /** Output geometry (differs from the source after crop, rotation or resize). */
+  width: number;
+  height: number;
   verification: Verification;
   /** width*height bytes, change magnitude per pixel (0 = identical). Only when the output is not identical. */
   diffMask?: Uint8Array;
@@ -85,13 +93,22 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
     iccOut = undefined; // the output is sRGB now
   }
 
+  // 1b. Geometry: crop, rotate/mirror, resize, at the source depth (before any narrowing).
+  let transformed = false;
+  let metadata = { ...m };
+  if (plan.transform && !isIdentity(pixels.width, pixels.height, plan.transform)) {
+    pixels = applyTransform(pixels, plan.transform);
+    transformed = true;
+    // A crop can remove every transparent pixel; resampling can create partial alpha at edges.
+    if (m.hasAlpha) metadata = { ...metadata, ...alphaStats(pixels) };
+  }
+
   // 2. Bit depth the encoder will write.
   const outDepth = plannedBitDepth(pixels.bitDepth, { decoder: p.decoderCaps, encoder: enc });
   pixels = convertBitDepth(pixels, outDepth);
 
   // 3. Flatten if the target has no alpha.
   const flatten = needsFlatten({ format: sourceFormat, metadata: m }, enc);
-  let metadata = { ...m };
   if (flatten) {
     if (!plan.background) {
       throw new FlattenRequiredError(
@@ -108,6 +125,7 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
     exifOut = target.metadataMode === 'strip-gps' ? stripGps(m.exif) : normalizeExif(m.exif);
     // Pixels are stored upright: a carried orientation tag must say so.
     exifOut = setOrientation(exifOut, 1);
+    if (transformed) exifOut = setExifGeometry(exifOut, pixels.width, pixels.height);
   }
   const xmpOut = m.xmp && target.metadataMode === 'preserve' && enc.metadata.xmp ? m.xmp : undefined;
   const iccEmbed = iccOut && target.iccMode === 'preserve' && enc.metadata.icc && !p.decoderCaps.decodeAppliesIcc ? iccOut : undefined;
@@ -149,6 +167,7 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
     verifierId: p.verifier.id,
     comparedAgainstFlattened: flatten,
     comparedAgainstConverted: converted,
+    comparedAgainstTransformed: transformed,
     metadata: {
       exif: outcome(wantExif, h.hasExif, m.hasExif),
       gps: outcome(wantGps, h.hasGps, m.hasGps),
@@ -159,7 +178,18 @@ export async function convert(p: Pipeline, source: DecodedImage, sourceFormat: I
   };
   verification.metadataOk = !Object.values(verification.metadata).includes('unexpected');
 
-  return { bytes, mime: MIME[target.format], format: target.format, bitDepth: outDepth, encoderId: p.encoder.id, ...(h.colorLayout && { colorLayout: h.colorLayout }), verification, ...(mask && { diffMask: mask }) };
+  return {
+    bytes,
+    mime: MIME[target.format],
+    format: target.format,
+    bitDepth: outDepth,
+    encoderId: p.encoder.id,
+    ...(h.colorLayout && { colorLayout: h.colorLayout }),
+    width: pixels.width,
+    height: pixels.height,
+    verification,
+    ...(mask && { diffMask: mask }),
+  };
 }
 
 function clampQuality(q: number | undefined): number {

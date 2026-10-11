@@ -67,6 +67,8 @@ export interface ImageMetadata {
   hasMakerNote?: boolean;
   /** EXIF carries an IFD1 thumbnail with its own metadata segments. */
   thumbnailHasMetadata?: boolean;
+  /** EXIF carries an IFD1 thumbnail image. */
+  hasThumbnail?: boolean;
   hasIcc: boolean;
   hasXmp: boolean;
   /** Parsed ICC facts, when the profile bytes were extracted. */

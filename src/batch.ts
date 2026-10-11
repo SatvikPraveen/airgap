@@ -46,8 +46,8 @@ export function aggregateLosses(perFile: Loss[][]): AggregatedLoss[] {
     }
   });
   const out = [...byKind.values()];
-  // Pixel losses first, then metadata, each group in first-seen order.
-  return [...out.filter((a) => a.severity === 'pixels'), ...out.filter((a) => a.severity === 'metadata')];
+  // Geometric edits first, then pixel losses, then metadata, each group in first-seen order.
+  return (['geometry', 'pixels', 'metadata'] as const).flatMap((sev) => out.filter((a) => a.severity === sev));
 }
 
 export interface BatchCounts {

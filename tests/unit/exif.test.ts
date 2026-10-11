@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeExif, parseExif, setOrientation, stripGps, summarizeExif } from '../../src/metadata/exif';
+import { normalizeExif, parseExif, setExifGeometry, setOrientation, stripGps, summarizeExif } from '../../src/metadata/exif';
 import { extractMetadata } from '../../src/metadata/containers';
-import { entryAscii, entryBlob, entryShort, entrySubIfd, findEntry, parseTiffStructure, readAscii, readNumber, serializeTiffStructure, TAG } from '../../src/metadata/tiff-ifd';
+import { entryAscii, entryBlob, entryLong, entryShort, entrySubIfd, findEntry, parseTiffStructure, readAscii, readNumber, serializeTiffStructure, TAG } from '../../src/metadata/tiff-ifd';
 import { fixture } from './helpers';
 
 const exifOf = (name: string) => extractMetadata(fixture(name), 'jpeg').exif!;
@@ -91,5 +91,46 @@ describe('setOrientation', () => {
     const le = true;
     const bytes = serializeTiffStructure({ littleEndian: le, ifd0: { entries: [entryAscii(TAG.Make, 'x')] } });
     expect(setOrientation(bytes, 1)).toBe(bytes);
+  });
+});
+
+describe('setExifGeometry', () => {
+  const le = true;
+  const thumb = new Uint8Array([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]);
+  const make = (xType: 'short' | 'long') =>
+    serializeTiffStructure({
+      littleEndian: le,
+      ifd0: {
+        entries: [
+          entryAscii(TAG.Make, 'cam'),
+          entrySubIfd(TAG.ExifIFD, {
+            entries: [xType === 'short' ? entryShort(le, TAG.PixelXDimension, [640]) : entryLong(le, TAG.PixelXDimension, [640]), entryShort(le, TAG.PixelYDimension, [480])],
+          }),
+        ],
+        next: { entries: [entryBlob(le, TAG.JPEGInterchangeFormat, thumb), entryLong(le, TAG.JPEGInterchangeFormatLength, [thumb.length])] },
+      },
+    });
+  it('rewrites the pixel dimensions, removes the thumbnail IFD, keeps everything else', () => {
+    const out = setExifGeometry(make('short'), 480, 640);
+    const s = parseExif(out);
+    const exif = findEntry(s.ifd0, TAG.ExifIFD)!.sub!;
+    expect(readNumber(findEntry(exif, TAG.PixelXDimension)!, le)).toBe(480);
+    expect(readNumber(findEntry(exif, TAG.PixelYDimension)!, le)).toBe(640);
+    expect(s.ifd0.next).toBeUndefined();
+    expect(summarizeExif(out).hasThumbnail).toBe(false);
+    expect(readAscii(findEntry(s.ifd0, TAG.Make)!)).toBe('cam');
+  });
+  it('a SHORT tag that cannot hold the new size becomes LONG; a LONG tag stays LONG', () => {
+    const big = parseExif(setExifGeometry(make('short'), 70000, 3));
+    const e = findEntry(findEntry(big.ifd0, TAG.ExifIFD)!.sub!, TAG.PixelXDimension)!;
+    expect(e.type).toBe(4);
+    expect(readNumber(e, le)).toBe(70000);
+    const long = parseExif(setExifGeometry(make('long'), 10, 3));
+    expect(findEntry(findEntry(long.ifd0, TAG.ExifIFD)!.sub!, TAG.PixelXDimension)!.type).toBe(4);
+  });
+  it('does not add dimension tags that were not there', () => {
+    const plain = serializeTiffStructure({ littleEndian: le, ifd0: { entries: [entryShort(le, TAG.Orientation, [1])] } });
+    const s = parseExif(setExifGeometry(plain, 5, 5));
+    expect(findEntry(s.ifd0, TAG.ExifIFD)).toBeUndefined();
   });
 });

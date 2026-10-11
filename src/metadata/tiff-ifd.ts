@@ -56,6 +56,8 @@ export const TAG = {
   IccProfile: 0x8773,
   GpsIFD: 0x8825,
   InteropIFD: 0xa005,
+  PixelXDimension: 0xa002,
+  PixelYDimension: 0xa003,
 } as const;
 
 const SUB_IFD_TAGS = new Set<number>([TAG.ExifIFD, TAG.GpsIFD, TAG.InteropIFD]);
