@@ -17,3 +17,10 @@ export function p3Pixel(x: number, y: number): [number, number, number];
 export const LOCATION: { lat: [number, number][]; lon: [number, number][]; decimalLat: string; decimalLon: string; xmpLat: string; xmpLon: string; makerAscii: string };
 export function locationNeedles(): { name: string; bytes: number[] }[];
 export function findLocationNeedles(bytes: ArrayLike<number>): string[];
+export const APNG_OPS: {
+  width: number;
+  height: number;
+  plays: number;
+  frames: { x: number; y: number; w: number; h: number; delay: [number, number]; dispose: number; blend: number; fill: (x: number, y: number) => number[] }[];
+};
+export function apngOpsExpectedFrames(): Uint8Array[];

@@ -123,6 +123,11 @@ function inspectPng(b: Uint8Array): HeaderInfo {
   let sawIhdr = false;
   let paletteSize = 0;
   let colorDescription: ColorDescription | undefined;
+  let numFrames = 0;
+  let plays = 0;
+  let durationMs = 0;
+  let fctlBeforeIdat = false;
+  let sawIdat = false;
 
   while (off + 8 <= b.length) {
     const len = u32be(b, off);
@@ -139,7 +144,16 @@ function inspectPng(b: Uint8Array): HeaderInfo {
     } else if (type === 'tRNS') hasTrns = true;
     else if (type === 'iCCP') hasIcc = true;
     else if (type === 'cICP' && len >= 4) colorDescription = cicp(b[dataOff]!, b[dataOff + 1]!, b[dataOff + 2]!, b[dataOff + 3]! === 1);
-    else if (type === 'acTL') isAnimated = true;
+    else if (type === 'acTL' && len >= 8) {
+      isAnimated = true;
+      numFrames = u32be(b, dataOff);
+      plays = u32be(b, dataOff + 4);
+    } else if (type === 'fcTL' && len >= 26) {
+      if (!sawIdat) fctlBeforeIdat = true;
+      const num = u16be(b, dataOff + 20);
+      const den = u16be(b, dataOff + 22) || 100;
+      durationMs += (1000 * num) / den;
+    } else if (type === 'IDAT') sawIdat = true;
     else if (type === 'eXIf') {
       hasExif = true;
       const tiff = parseTiff(b.subarray(dataOff, dataOff + len));
@@ -165,6 +179,7 @@ function inspectPng(b: Uint8Array): HeaderInfo {
   if (orientation !== undefined) metadata.orientation = orientation;
   if (colorDescription) metadata.colorDescription = colorDescription;
   metadata.colorLayout = pngLayoutLabel(colorType, bitDepth, paletteSize);
+  if (isAnimated) metadata.animationInfo = { frames: numFrames, loops: plays, durationMs: Math.round(durationMs), hiddenDefault: !fctlBeforeIdat };
   return { format: 'png', width, height, metadata };
 }
 

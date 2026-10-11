@@ -97,8 +97,10 @@ export interface ImageMetadata {
    * container says nothing, or only says "unspecified".
    */
   colorDescription?: ColorDescription;
-  /** Animated container or multi-page file. Only the first frame/page is used. */
+  /** Animated container or multi-page file. */
   isAnimated: boolean;
+  /** APNG facts from the header, for display and the memory guard. */
+  animationInfo?: { frames: number; loops: number; durationMs: number; hiddenDefault: boolean };
   /** For WebP/AVIF/JXL: the source was stored losslessly. */
   sourceLossless?: boolean;
   /** How samples are laid out in the container, for display: e.g. "palette (43 colours), 8-bit". */
@@ -109,9 +111,28 @@ export interface ImageMetadata {
   xmp?: Uint8Array;
 }
 
+/** One displayed frame of an animation: the whole canvas, already composited. */
+export interface AnimationFrame {
+  pixels: PixelData;
+  /** Delay as the fraction delayNum / delayDen seconds (APNG semantics; den 0 is read as 100). */
+  delayNum: number;
+  delayDen: number;
+}
+
+export interface Animation {
+  frames: AnimationFrame[];
+  /** Number of plays; 0 = forever. */
+  loops: number;
+  /** The still (default) image is not one of the frames (APNG: IDAT without a preceding fcTL). */
+  hiddenDefault: boolean;
+}
+
 export interface DecodedImage {
+  /** The still image: what a viewer without animation support shows. */
   pixels: PixelData;
   metadata: ImageMetadata;
+  /** Every frame, when the decoder reads animations and the source is animated. */
+  animation?: Animation;
 }
 
 export interface EncodeOptions {
@@ -159,6 +180,8 @@ export interface CodecCapabilities {
   encodeBitDepths: number[];
   /** Which metadata payloads the encoder can embed. */
   metadata: { exif: boolean; icc: boolean; xmp: boolean };
+  /** Reads every frame of an animated source and writes animations, frames and timing exact (probed). */
+  animation?: boolean;
 }
 
 export interface Codec {

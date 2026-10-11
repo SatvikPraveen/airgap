@@ -151,3 +151,49 @@ export function findLocationNeedles(bytes) {
   }
   return hits;
 }
+
+/**
+ * apng-ops.png: four frames exercising every dispose_op and blend_op. OVER is used only with
+ * source alpha 0 or 255, so the composited result involves no rounding.
+ */
+export const APNG_OPS = {
+  width: 32,
+  height: 24,
+  plays: 3,
+  frames: [
+    { x: 0, y: 0, w: 32, h: 24, delay: [1, 10], dispose: 0, blend: 0, fill: (x, y) => [x * 8, y * 10, 128, y >= 8 && y < 12 ? 100 : 255] },
+    { x: 4, y: 3, w: 10, h: 8, delay: [7, 100], dispose: 1, blend: 1, fill: (x, y) => ((x + y) % 3 === 0 ? [250, 10, 10, 0] : [20, 220, 40, 255]) },
+    { x: 12, y: 6, w: 9, h: 10, delay: [250, 1000], dispose: 2, blend: 0, fill: (x, y) => [10 * x, 200, 10 * y, 40 + 20 * ((x + y) % 5)] },
+    { x: 20, y: 14, w: 6, h: 5, delay: [0, 0], dispose: 0, blend: 1, fill: (x) => [255, 255, (x * 40) % 256, 255] },
+  ],
+};
+
+/**
+ * The specification's compositing for APNG_OPS, written out directly from its definition
+ * (independent of src/codecs/apng.ts): the canvas starts transparent black; OVER with alpha 0
+ * keeps the destination and with alpha 255 replaces it; dispose BACKGROUND clears the frame's
+ * rectangle; dispose PREVIOUS restores it to what it was before the frame was drawn.
+ */
+export function apngOpsExpectedFrames() {
+  const { width: W, frames } = APNG_OPS;
+  const canvas = new Uint8Array(W * APNG_OPS.height * 4);
+  const out = [];
+  for (const f of frames) {
+    const before = canvas.slice();
+    for (let y = 0; y < f.h; y++)
+      for (let x = 0; x < f.w; x++) {
+        const px = f.fill(x, y);
+        const i = ((f.y + y) * W + f.x + x) * 4;
+        if (f.blend === 0 || px[3] === 255) canvas.set(px, i);
+        else if (px[3] !== 0) throw new Error('fixture uses OVER with partial alpha');
+      }
+    out.push(canvas.slice());
+    for (let y = 0; y < f.h; y++)
+      for (let x = 0; x < f.w; x++) {
+        const i = ((f.y + y) * W + f.x + x) * 4;
+        if (f.dispose === 1) canvas.fill(0, i, i + 4);
+        else if (f.dispose === 2) canvas.set(before.subarray(i, i + 4), i);
+      }
+  }
+  return out;
+}

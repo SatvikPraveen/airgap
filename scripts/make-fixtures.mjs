@@ -26,6 +26,8 @@
  *   rgba-partial.jxl    64x48  lossless JPEG XL with alpha
  *   exif-gps.jxl        64x48  the same codestream in a JXL container with Exif (GPS) and xml boxes
  *   rgba-partial.qoi    64x48  QOI with alpha, written by the reference encoder (qoi.h via @jsquash/qoi)
+ *   apng-ops.png        32x24  APNG, 4 frames: every dispose_op and blend_op, sub-rectangles, mixed delays, 3 plays
+ *   apng-hidden.png     16x16  APNG whose IDAT still image is not a frame, 2 frames in fdAT, loops forever
  */
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -636,6 +638,67 @@ try {
   write('rgba-partial.qoi', enc.encode(new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.length), P.RGBA_PARTIAL.width, P.RGBA_PARTIAL.height));
 } catch (err) {
   console.warn('QOI fixture skipped:', err.message);
+}
+
+// ---------------------------------------------------------------- APNG (hand-built, 8-bit RGBA)
+
+/** IDAT/fdAT payload for RGBA8 rows, filter 0 on every row. */
+function apngData(w, h, fill) {
+  const raw = Buffer.alloc(h * (1 + w * 4));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw.set(fill(x, y), y * (1 + w * 4) + 1 + x * 4);
+  return deflateSync(raw);
+}
+function apng({ width, height, plays, frames, hiddenDefault }) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  const actl = Buffer.alloc(8);
+  actl.writeUInt32BE(frames.length, 0);
+  actl.writeUInt32BE(plays, 4);
+  const parts = [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pngChunk('IHDR', ihdr), pngChunk('acTL', actl)];
+  let seq = 0;
+  if (hiddenDefault) parts.push(pngChunk('IDAT', apngData(width, height, hiddenDefault)));
+  frames.forEach((f, i) => {
+    const c = Buffer.alloc(26);
+    c.writeUInt32BE(seq++, 0);
+    c.writeUInt32BE(f.w, 4);
+    c.writeUInt32BE(f.h, 8);
+    c.writeUInt32BE(f.x, 12);
+    c.writeUInt32BE(f.y, 16);
+    c.writeUInt16BE(f.delay[0], 20);
+    c.writeUInt16BE(f.delay[1], 22);
+    c[24] = f.dispose;
+    c[25] = f.blend;
+    parts.push(pngChunk('fcTL', c));
+    const data = apngData(f.w, f.h, f.fill);
+    if (i === 0 && !hiddenDefault) parts.push(pngChunk('IDAT', data));
+    else {
+      const sq = Buffer.alloc(4);
+      sq.writeUInt32BE(seq++, 0);
+      parts.push(pngChunk('fdAT', Buffer.concat([sq, data])));
+    }
+  });
+  parts.push(pngChunk('IEND', Buffer.alloc(0)));
+  return Buffer.concat(parts);
+}
+{
+  // apng-ops.png is defined in tests/fixtures/pattern.mjs (APNG_OPS), shared with the tests.
+  write('apng-ops.png', apng(P.APNG_OPS));
+  write(
+    'apng-hidden.png',
+    apng({
+      width: 16,
+      height: 16,
+      plays: 0,
+      hiddenDefault: (x, y) => [200, 200, 200, 255],
+      frames: [
+        { x: 0, y: 0, w: 16, h: 16, delay: [1, 2], dispose: 0, blend: 0, fill: (x, y) => [x * 16, 0, y * 16, 255] },
+        { x: 2, y: 2, w: 4, h: 4, delay: [1, 2], dispose: 0, blend: 0, fill: () => [0, 255, 0, 255] },
+      ],
+    }),
+  );
 }
 
 console.log('fixtures written to', out);
