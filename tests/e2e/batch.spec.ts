@@ -54,14 +54,15 @@ test('mixed batch: the loss panel counts files per loss, and the metadata contro
   await expect(exif).toContainText('1 of 3 files:');
   await expect(exif).toContainText('GPS');
   await expect(page.locator('[data-loss="bit-depth"]')).toContainText('1 of 3 files:');
-  // WebKit's own JPEG decoder (ImageIO) rounds differently from mozjpeg, so the JPEG decoder cannot
+  // WebKit on macOS decodes JPEG with ImageIO, which rounds differently from mozjpeg, so the JPEG decoder cannot
   // be cross-checked there and the one JPEG in the batch is honestly flagged (tests/browser/engine-matrix).
-  if (browserName === 'webkit') await expect(page.locator('[data-loss="decoder-unverified"]')).toContainText('1 of 3 files:');
+  const imageIo = browserName === 'webkit' && process.platform === 'darwin'; // see tests/browser/helpers.ts IMAGEIO
+  if (imageIo) await expect(page.locator('[data-loss="decoder-unverified"]')).toContainText('1 of 3 files:');
   else await expect(page.locator('[data-loss="decoder-unverified"]')).toHaveCount(0);
   // Lossless-only: one 16-bit file loses bits in WebP, so the target is excluded for the whole batch.
   await page.getByTestId('lossless-only').check();
   await expect(page.getByTestId('target').locator('option[value="webp-lossless"]')).toBeDisabled();
-  if (browserName === 'webkit') {
+  if (imageIo) {
     // The unverified JPEG decoder is a pixel loss for every target: nothing is lossless for this batch.
     await expect(page.getByTestId('target').locator('option[value="png"]')).toBeDisabled();
     await expect(page.getByTestId('no-target')).toContainText('every file in this batch');

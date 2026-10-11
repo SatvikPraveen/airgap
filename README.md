@@ -343,10 +343,16 @@ all three. Where an engine differs, the difference is measured, pinned in
 
 | Engine | What differs | What the app does |
 | --- | --- | --- |
-| WebKit | its JPEG decoder (ImageIO) rounds differently from libjpeg-turbo, so mozjpeg's decoder cannot be cross-checked | JPEG sources carry a `decoder-unverified` pixel loss |
-| WebKit | the canvas cannot encode WebP (it returns PNG) | the canvas WebP fallback reports itself unavailable |
-| Firefox | the premultiplied canvas never settles: semi-transparent pixels re-round on every pass | nothing (only the canvas fallback is affected, and it already declares inexact alpha) |
+| WebKit on macOS (Safari) | its JPEG decoder (ImageIO) rounds differently from libjpeg-turbo, so mozjpeg's decoder cannot be cross-checked | JPEG sources carry a `decoder-unverified` pixel loss |
+| WebKit on macOS (Safari) | the canvas cannot encode WebP (it returns PNG) | the canvas WebP fallback reports itself unavailable |
+| Firefox, WebKit on Linux | the premultiplied canvas never settles: semi-transparent pixels re-round on every pass | nothing (only the canvas fallback is affected, and it already declares inexact alpha) |
 | Firefox | worker imports are checked against `worker-src` | the CSP allows `'self'` there (see above) |
+
+WebKit is not one target: the Linux port that CI runs uses libjpeg-turbo,
+libwebp and its own canvas, while Safari on macOS uses Apple's ImageIO and
+CoreGraphics. The expectations are therefore keyed on engine and platform,
+and the macOS rows are measured on a Mac. The Linux rows are measured in CI
+and reproduced locally in Playwright's Linux container image.
 
 One test is skipped in one engine: Firefox's `ClipboardEvent` constructor
 empties the clipboard data it is given, so a synthetic paste cannot carry a

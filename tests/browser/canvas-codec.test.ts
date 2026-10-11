@@ -9,7 +9,7 @@ import { probeCodec } from '../../src/codecs/probe';
 import { summarizeExif } from '../../src/metadata/exif';
 import { extractMetadata } from '../../src/metadata/containers';
 import * as P from '../fixtures/pattern.mjs';
-import { ENGINE, firstMismatch, fixtureBytes, maxChannelDiff, maxOpaqueDiff, rasterFrom } from './helpers';
+import { CANVAS_SETTLES, IMAGEIO, firstMismatch, fixtureBytes, maxChannelDiff, maxOpaqueDiff, rasterFrom } from './helpers';
 
 const png = createCanvasCodec('png');
 const jpeg = createCanvasCodec('jpeg');
@@ -27,8 +27,8 @@ describe('canvas codec declarations vs probe', () => {
   });
   it('WebP: lossless verified at quality 1 where the canvas can encode WebP; elsewhere the probe claims nothing', async () => {
     const r = await probeCodec(webp);
-    if (ENGINE === 'webkit') {
-      // WebKit's convertToBlob silently returns PNG for image/webp; the codec refuses that output.
+    if (IMAGEIO) {
+      // WebKit on macOS: convertToBlob silently returns PNG for image/webp; the codec refuses that output.
       expect(r.probe.ok).toBe(false);
       expect(r.capabilities.encode).toBe(false);
       expect(r.capabilities.lossless).toBe(false);
@@ -71,10 +71,10 @@ describe('canvas encode + container metadata', () => {
   it('PNG -> PNG opaque round trip is exact; alpha-0 RGB is lost (documented)', async () => {
     const a = await png.decode(await fixtureBytes('rgba-partial.png'));
     const b = await png.decode(await png.encode(a, { lossless: true }));
-    // Opaque pixels survive exactly in every engine. Chromium and WebKit also reach a fixed point
-    // after one pass; Firefox keeps re-rounding semi-transparent pixels on every pass.
+    // Opaque pixels survive exactly in every engine. Chromium and macOS WebKit also reach a fixed
+    // point after one pass; Firefox and Linux WebKit keep re-rounding semi-transparent pixels.
     expect(maxOpaqueDiff(a.pixels.data, b.pixels.data)).toBe(0);
-    if (ENGINE !== 'firefox') expect(maxChannelDiff(a.pixels.data, b.pixels.data)).toBe(0);
+    if (CANVAS_SETTLES) expect(maxChannelDiff(a.pixels.data, b.pixels.data)).toBe(0);
     else expect(maxChannelDiff(a.pixels.data, b.pixels.data)).toBeGreaterThan(0);
     const noise = P.lcg(2);
     const truth = rasterFrom(P.RGBA_PARTIAL, (x, y) => P.rgbaPixel(x, y, noise));
@@ -82,7 +82,7 @@ describe('canvas encode + container metadata', () => {
   });
   it('embeds EXIF into a canvas-encoded JPEG/PNG/WebP', async () => {
     const src = await jpeg.decode(await fixtureBytes('exif-gps.jpg'));
-    for (const c of ENGINE === 'webkit' ? [png, jpeg] : [png, jpeg, webp]) {
+    for (const c of IMAGEIO ? [png, jpeg] : [png, jpeg, webp]) {
       const out = await c.encode(src, { lossless: c.format !== 'jpeg', quality: 0.9, exif: src.metadata.exif! });
       const back = extractMetadata(out, c.format);
       expect(summarizeExif(back.exif!).make, c.id).toBe('Airgap Fixtures');

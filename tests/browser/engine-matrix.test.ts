@@ -5,9 +5,9 @@
 import { describe, expect, it } from 'vitest';
 import { CodecRegistry } from '../../src/codecs/registry';
 import type { ImageFormat } from '../../src/codecs/types';
-import { ENGINE } from './helpers';
+import { ENGINE, IMAGEIO } from './helpers';
 
-const EXPECTED: Record<typeof ENGINE, Record<ImageFormat, { encoder: string; lossless: boolean; decoderExact: boolean }>> = {
+const EXPECTED: Record<typeof ENGINE | 'webkit-macos', Record<ImageFormat, { encoder: string; lossless: boolean; decoderExact: boolean }>> = {
   chromium: {
     png: { encoder: 'airgap-png', lossless: true, decoderExact: true },
     jpeg: { encoder: 'wasm-jpeg', lossless: false, decoderExact: true },
@@ -26,6 +26,14 @@ const EXPECTED: Record<typeof ENGINE, Record<ImageFormat, { encoder: string; los
   },
   webkit: {
     png: { encoder: 'airgap-png', lossless: true, decoderExact: true },
+    jpeg: { encoder: 'wasm-jpeg', lossless: false, decoderExact: true },
+    webp: { encoder: 'wasm-webp', lossless: true, decoderExact: true },
+    avif: { encoder: 'wasm-avif', lossless: true, decoderExact: true },
+    jxl: { encoder: 'wasm-jxl', lossless: true, decoderExact: true },
+    tiff: { encoder: 'utif-tiff', lossless: true, decoderExact: true },
+  },
+  'webkit-macos': {
+    png: { encoder: 'airgap-png', lossless: true, decoderExact: true },
     // ImageIO's JPEG decoder rounds differently from libjpeg-turbo, so mozjpeg's decoder
     // cannot be cross-checked and is reported unverified.
     jpeg: { encoder: 'wasm-jpeg', lossless: false, decoderExact: false },
@@ -36,14 +44,16 @@ const EXPECTED: Record<typeof ENGINE, Record<ImageFormat, { encoder: string; los
   },
 };
 
-describe(`probe outcomes in ${ENGINE}`, () => {
+const KEY = IMAGEIO ? 'webkit-macos' : ENGINE;
+
+describe(`probe outcomes in ${KEY}`, () => {
   const registry = new CodecRegistry();
   for (const format of ['png', 'jpeg', 'webp', 'avif', 'jxl', 'tiff'] as ImageFormat[]) {
     it(format, async () => {
       const enc = await registry.resolve(format, 'encode');
       const dec = await registry.resolve(format, 'decode');
       const seen = { encoder: enc.resolved.codecId, lossless: enc.resolved.capabilities.lossless, decoderExact: dec.resolved.capabilities.decodeExact };
-      expect(seen, `${dec.resolved.codecId}: ${dec.resolved.probe.detail}`).toEqual(EXPECTED[ENGINE][format]);
+      expect(seen, `${dec.resolved.codecId}: ${dec.resolved.probe.detail}`).toEqual(EXPECTED[KEY][format]);
     });
   }
 });

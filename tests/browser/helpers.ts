@@ -3,6 +3,16 @@ import type { DecodedImage, PixelData } from '../../src/codecs/types';
 
 /** The engine this browser-mode run is in: 'chromium', 'firefox' or 'webkit'. */
 export const ENGINE = server.browser as 'chromium' | 'firefox' | 'webkit';
+
+/**
+ * WebKit on macOS decodes and encodes images through Apple's ImageIO / CoreGraphics; the
+ * Linux WebKit port (what CI runs) uses libjpeg-turbo, libwebp and its own canvas. The two
+ * behave differently, so expectations are keyed on this, not on the engine name alone.
+ */
+export const IMAGEIO = ENGINE === 'webkit' && server.platform === 'darwin';
+
+/** Canvases that reach a fixed point after one premultiplied PNG round trip (measured). */
+export const CANVAS_SETTLES = ENGINE === 'chromium' || IMAGEIO;
 import { allocate } from '../../src/pixels';
 
 export async function fixtureBytes(name: string): Promise<Uint8Array> {
