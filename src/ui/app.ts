@@ -14,8 +14,11 @@ import { renderResult } from './resultPanel';
 import { renderSource } from './sourcePanel';
 import { initialState, TARGET_ORDER, TARGETS, type AppState, type TargetKey } from './state';
 import { inspect } from '../inspect';
-import { sizeRefusal, sizeWarning } from '../limits';
-import { WorkerCancelledError, WorkerClient } from './workerClient';
+import { previewOnDemand, sizeRefusal, sizeWarning } from '../limits';
+import { createPreviewScheduler } from './preview';
+import { renderPreview } from './previewPanel';
+import { WorkerCancelledError, WorkerClient, type ConvertedMessage } from './workerClient';
+import type { ConversionPlan } from '../convert';
 
 /** "build abc1234" linking to the commit, plus the checksums file the deploy workflow attests. */
 function buildLink(): HTMLElement {
@@ -50,6 +53,40 @@ export function mountApp(root: HTMLElement): AppHandle {
     void recover();
   };
 
+  // The preview runs the real pipeline at the current settings so its numbers are what
+  // Convert will produce. Scheduling policy (debounce, one in flight, newest wins) lives
+  // in preview.ts and is unit-tested there.
+  const previewer = createPreviewScheduler<{ id: number; plan: ConversionPlan; quality: number }, ConvertedMessage>({
+    run: (requestId, p) => worker.preview(p.id, requestId, p.plan),
+    onResult(key, _requestId, out) {
+      const src = state.source;
+      if (!src) return;
+      discardPreview();
+      state.previewError = null;
+      state.preview = {
+        key,
+        quality: previewQualityOf(key),
+        url: URL.createObjectURL(new Blob([out.bytes], { type: out.mime })),
+        size: out.bytes.byteLength,
+        verification: out.verification,
+        ...(out.diffMask && { diffMask: out.diffMask }),
+        width: src.info.width,
+        height: src.info.height,
+        sourceUrl: src.previewUrl,
+      };
+      render();
+    },
+    onError(_key, _requestId, err) {
+      if (err instanceof WorkerCancelledError) return;
+      state.previewError = err.message;
+      render();
+    },
+    onBusy(busy) {
+      state.previewBusy = busy;
+      render();
+    },
+  });
+
   // ---- static skeleton ---------------------------------------------------
 
   const errorBox = h('div', { class: 'error', role: 'alert', 'data-testid': 'error', hidden: true });
@@ -61,12 +98,14 @@ export function mountApp(root: HTMLElement): AppHandle {
   const losslessOnly = h('input', { type: 'checkbox', 'data-testid': 'lossless-only' });
   const quality = h('input', { type: 'range', min: '1', max: '100', step: '1', 'data-testid': 'quality' });
   const qualityValue = h('span', { 'data-testid': 'quality-value' });
+  const previewHost = h('div', { class: 'preview', 'data-testid': 'preview' });
   const qualityField = h(
     'div',
     { class: 'field', 'data-testid': 'quality-field' },
     h('label', { for: 'quality' }, 'Quality ', qualityValue),
     quality,
     h('div', { class: 'hint' }, 'Lower is smaller and loses more. 100 is still lossy for a lossy target.'),
+    previewHost,
   );
   quality.id = 'quality';
   const background = h('input', { type: 'color', 'data-testid': 'background' });
@@ -266,6 +305,23 @@ export function mountApp(root: HTMLElement): AppHandle {
     return { format: t.format, lossless: t.lossless, metadataMode: state.metadataMode, iccMode: state.iccMode };
   }
 
+  /** The plan Convert would run right now, or null when the target is not ready. */
+  function currentPlan(): ConversionPlan | null {
+    const src = state.source;
+    const enc = encoderCaps(TARGETS[state.target].format);
+    if (!src || !enc) return null;
+    const flatten = needsFlatten({ format: src.info.format, metadata: src.info.metadata }, enc);
+    return {
+      target: targetSpec(state.target),
+      quality: state.quality / 100,
+      ...(flatten ? { background: parseHexColor(state.background) } : {}),
+    };
+  }
+
+  /** Identity of a preview: the source and every setting that changes the output bytes. */
+  const previewKey = (id: number, plan: ConversionPlan): string => `${id}|${state.quality}|${JSON.stringify(plan)}`;
+  const previewQualityOf = (key: string): number => Number(key.split('|')[1]);
+
   function targetLosses(key: TargetKey): Loss[] | null {
     const dec = decoderCaps();
     const enc = encoderCaps(TARGETS[key].format);
@@ -350,6 +406,7 @@ export function mountApp(root: HTMLElement): AppHandle {
     qualityField.hidden = !lossyTarget;
     quality.value = String(state.quality);
     qualityValue.textContent = String(state.quality);
+    renderPreviewSection(lossyTarget);
 
     const src = state.source;
     const flatten = !!(src && enc && needsFlatten({ format: src.info.format, metadata: src.info.metadata }, enc));
@@ -406,6 +463,52 @@ export function mountApp(root: HTMLElement): AppHandle {
     if (state.result) resultHost.append(renderResult(state.result));
   }
 
+  /**
+   * Decides whether a preview should exist for the current plan and asks the scheduler
+   * for it; the scheduler ignores repeats, so calling this on every render is cheap.
+   */
+  function renderPreviewSection(lossyTarget: boolean): void {
+    const src = state.source;
+    const plan = lossyTarget && targetDisabledReason(state.target) === null ? currentPlan() : null;
+    if (!src || !plan) {
+      previewer.reset();
+      discardPreview();
+      state.previewError = null;
+      clear(previewHost);
+      return;
+    }
+    const key = previewKey(src.id, plan);
+    const onDemand = previewOnDemand(src.info.width, src.info.height);
+    const wanted = !onDemand || state.previewArmedKey === key;
+    if (wanted && state.ready && state.busy === 'idle') previewer.request(key, { id: src.id, plan, quality: state.quality });
+    clear(previewHost);
+    previewHost.append(
+      renderPreview({
+        quality: state.quality,
+        pixelCount: src.info.width * src.info.height,
+        preview: state.preview,
+        fresh: state.preview?.key === key,
+        busy: state.previewBusy,
+        error: state.previewError,
+        onDemand: onDemand && !wanted,
+        compareOpen: state.previewCompareOpen,
+        onRun: () => {
+          state.previewArmedKey = key;
+          render();
+        },
+        onToggleCompare: (open) => {
+          state.previewCompareOpen = open;
+          render();
+        },
+      }),
+    );
+  }
+
+  function discardPreview(): void {
+    if (state.preview) URL.revokeObjectURL(state.preview.url);
+    state.preview = null;
+  }
+
   // ---- actions -------------------------------------------------------------------
 
   function discardResult(): void {
@@ -418,6 +521,10 @@ export function mountApp(root: HTMLElement): AppHandle {
     state.notice = null;
     state.busy = 'loading';
     discardResult();
+    previewer.reset();
+    discardPreview();
+    state.previewError = null;
+    state.previewArmedKey = null;
     render();
     try {
       const bytes = await file.arrayBuffer();
@@ -458,12 +565,8 @@ export function mountApp(root: HTMLElement): AppHandle {
     render();
     try {
       const t = TARGETS[state.target];
-      const flatten = needsFlatten({ format: src.info.format, metadata: src.info.metadata }, enc);
-      const plan = {
-        target: targetSpec(state.target),
-        quality: state.quality / 100,
-        ...(flatten ? { background: parseHexColor(state.background) } : {}),
-      };
+      const plan = currentPlan();
+      if (!plan) throw new Error('The target encoder is not ready.');
       const out = await worker.convert(src.id, plan);
       const blob = new Blob([out.bytes], { type: out.mime });
       const base = src.file.name.replace(/\.[^.]+$/, '') || 'image';
@@ -507,6 +610,7 @@ export function mountApp(root: HTMLElement): AppHandle {
    * so the user keeps their place.
    */
   async function recover(): Promise<void> {
+    previewer.reset();
     state.caps = {};
     state.ensuring.clear();
     state.ensureErrors = {};

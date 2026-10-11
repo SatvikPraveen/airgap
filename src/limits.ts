@@ -11,6 +11,16 @@
 export const HARD_LIMIT_MEGAPIXELS = 80;
 /** Above this the source panel warns that conversion may be slow and memory-hungry. */
 export const SOFT_LIMIT_MEGAPIXELS = 24;
+/**
+ * Above this the quality preview does not run on every slider move: an AVIF encode of
+ * a large image takes seconds, and the preview is the real encode, not an estimate.
+ * The user runs it on demand instead.
+ */
+export const PREVIEW_AUTO_MEGAPIXELS = 4;
+
+export function previewOnDemand(width: number, height: number): boolean {
+  return megapixels(width, height) > PREVIEW_AUTO_MEGAPIXELS;
+}
 
 export function megapixels(width: number, height: number): number {
   return (width * height) / 1_000_000;

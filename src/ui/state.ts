@@ -61,6 +61,20 @@ export interface ConversionOutput {
   sourceUrl: string;
 }
 
+/** A quality preview: the real pipeline at the current settings, shown without producing a result. */
+export interface PreviewOutput {
+  /** Identity of the plan this preview was computed for (source id + every setting). */
+  key: string;
+  quality: number;
+  url: string;
+  size: number;
+  verification: Verification;
+  diffMask?: Uint8Array;
+  width: number;
+  height: number;
+  sourceUrl: string;
+}
+
 export interface AppState {
   ready: boolean;
   caps: CapabilityTable;
@@ -83,6 +97,14 @@ export interface AppState {
   /** The metadata inspector's disclosure state survives re-renders. */
   inspectorOpen: boolean;
   result: ConversionOutput | null;
+  /** Newest quality preview, possibly for an older plan than the current one (then shown as stale). */
+  preview: PreviewOutput | null;
+  previewBusy: boolean;
+  previewError: string | null;
+  /** The heat map / compare view under the slider is open. */
+  previewCompareOpen: boolean;
+  /** Above the auto-preview size the user runs previews one at a time; this is the plan key they asked for. */
+  previewArmedKey: string | null;
 }
 
 export function initialState(): AppState {
@@ -103,5 +125,10 @@ export function initialState(): AppState {
     notice: null,
     inspectorOpen: false,
     result: null,
+    preview: null,
+    previewBusy: false,
+    previewError: null,
+    previewCompareOpen: false,
+    previewArmedKey: null,
   };
 }

@@ -814,3 +814,45 @@ table.tags tr.fate-removed td:last-child {
     font-size: 26px;
   }
 }
+
+/* ---- live quality preview (under the slider) ---------------------------- */
+
+.preview-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.preview-note {
+  margin: 0;
+}
+
+.preview-stat {
+  font-size: 14px;
+  min-height: 1.4em;
+}
+
+.preview-stat .preview-status {
+  color: var(--muted);
+}
+
+.preview-stat .preview-error {
+  color: var(--warn-pixels-ink);
+}
+
+.preview-summary {
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-summary.stale,
+.preview-compare.stale {
+  opacity: 0.55;
+}
+
+.preview-compare {
+  transition: opacity 120ms ease-out;
+}
