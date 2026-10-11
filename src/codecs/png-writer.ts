@@ -212,31 +212,49 @@ export interface PngEncodeResult {
 }
 
 /**
- * Encodes to PNG with the minimal exact colour type. `hasAlpha` says whether
- * the alpha samples are meaningful (false: treated as opaque). Ancillary
- * metadata chunks are the caller's business (metadata/containers.ts).
+ * The layout every one of `images` fits exactly (one analysis over all of them), so that
+ * frames of an animation can share a single IHDR / PLTE / tRNS. Images must share a width.
  */
-export function encodePng(px: PixelData, hasAlpha: boolean): PngEncodeResult {
-  if (px.bitDepth !== 8 && px.bitDepth !== 16) throw new Error(`PNG writer takes 8 or 16-bit input, got ${px.bitDepth}`);
-  const a = analyze(px, hasAlpha);
+export function analyzeImages(images: PixelData[], hasAlpha: boolean): PngAnalysis {
+  if (images.length === 1) return analyze(images[0]!, hasAlpha);
+  const width = images[0]!.width;
+  const bitDepth = images[0]!.bitDepth;
+  const height = images.reduce((n, im) => n + im.height, 0);
+  const data = bitDepth === 8 ? new Uint8ClampedArray(width * height * 4) : new Uint16Array(width * height * 4);
+  let o = 0;
+  for (const im of images) {
+    if (im.width !== width || im.bitDepth !== bitDepth) throw new Error('analyzeImages: images must share width and bit depth');
+    data.set(im.data, o);
+    o += im.data.length;
+  }
+  return analyze({ width, height, bitDepth, data }, hasAlpha);
+}
+
+/** Opaque analysis result: the layout plus the palette mapping needed to pack pixels. */
+export type PngAnalysis = Analysis;
+
+/** Filtered and deflated image data (the payload of IDAT, or of fdAT after its sequence number). */
+export function encodeImageData(px: PixelData, a: PngAnalysis): Uint8Array {
   const { rows, rowBytes } = scanlines(px, a);
   const ch = channelsOf(a.colorType);
   const bpp = a.colorType === 3 ? 1 : Math.max(1, (ch * a.bitDepth) / 8);
   const filtered = filterRows(rows, rowBytes, px.height, bpp, a.colorType !== 3 && a.bitDepth >= 8);
   const level = filtered.length > 24 * 1024 * 1024 ? 6 : 9;
-  const idat = deflate(filtered, { level });
+  return deflate(filtered, { level });
+}
 
+/** IHDR, then PLTE and tRNS when the layout is a palette. */
+export function headerChunks(width: number, height: number, a: PngAnalysis): Uint8Array[] {
   const ihdr = new Uint8Array(13);
   const dv = new DataView(ihdr.buffer);
-  dv.setUint32(0, px.width);
-  dv.setUint32(4, px.height);
+  dv.setUint32(0, width);
+  dv.setUint32(4, height);
   ihdr[8] = a.bitDepth;
   ihdr[9] = a.colorType;
   ihdr[10] = 0; // deflate
   ihdr[11] = 0; // adaptive filtering
   ihdr[12] = 0; // no interlace
-
-  const chunks: Uint8Array[] = [PNG_SIGNATURE, pngChunk('IHDR', ihdr)];
+  const chunks: Uint8Array[] = [pngChunk('IHDR', ihdr)];
   if (a.colorType === 3) {
     const n = a.paletteSize!;
     const plte = new Uint8Array(n * 3);
@@ -254,9 +272,22 @@ export function encodePng(px: PixelData, hasAlpha: boolean): PngEncodeResult {
       chunks.push(pngChunk('tRNS', trns));
     }
   }
-  chunks.push(pngChunk('IDAT', idat), pngChunk('IEND', new Uint8Array(0)));
-  const { palette, indexOf, ...layout } = a;
-  void palette;
-  void indexOf;
-  return { bytes: concat(chunks), layout };
+  return chunks;
+}
+
+export function layoutOf(a: PngAnalysis): PngLayout {
+  return { colorType: a.colorType, bitDepth: a.bitDepth, ...(a.paletteSize !== undefined && { paletteSize: a.paletteSize }) };
+}
+
+/**
+ * Encodes to PNG with the minimal exact colour type. `hasAlpha` says whether
+ * the alpha samples are meaningful (false: treated as opaque). Ancillary
+ * metadata chunks are the caller's business (metadata/containers.ts).
+ */
+export function encodePng(px: PixelData, hasAlpha: boolean): PngEncodeResult {
+  if (px.bitDepth !== 8 && px.bitDepth !== 16) throw new Error(`PNG writer takes 8 or 16-bit input, got ${px.bitDepth}`);
+  const a = analyze(px, hasAlpha);
+  const idat = encodeImageData(px, a);
+  const chunks: Uint8Array[] = [PNG_SIGNATURE, ...headerChunks(px.width, px.height, a), pngChunk('IDAT', idat), pngChunk('IEND', new Uint8Array(0))];
+  return { bytes: concat(chunks), layout: layoutOf(a) };
 }
