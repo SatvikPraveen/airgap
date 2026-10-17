@@ -30,7 +30,8 @@ function canvas2d(w: number, h: number) {
 
 /** Path 1: the browser decodes the whole file (rotation and grids are its business). */
 async function viaImageDecoder(bytes: Uint8Array): Promise<PixelData> {
-  const bmp = await createImageBitmap(new Blob([bytes as BlobPart], { type: 'image/heic' }), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+  // premultiplyAlpha stays at its default, as in canvas.ts (WebKit 27.2 on macOS mishandles 'none').
+  const bmp = await createImageBitmap(new Blob([bytes as BlobPart], { type: 'image/heic' }), { colorSpaceConversion: 'none' });
   try {
     const ctx = canvas2d(bmp.width, bmp.height);
     ctx.drawImage(bmp, 0, 0);

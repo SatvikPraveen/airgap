@@ -452,6 +452,9 @@ all three. Where an engine differs, the difference is measured, pinned in
 | WebKit on macOS (Safari) | its JPEG decoder (ImageIO) rounds differently from libjpeg-turbo, so mozjpeg's decoder cannot be cross-checked | JPEG sources carry a `decoder-unverified` pixel loss |
 | WebKit on macOS (Safari) | the canvas cannot encode WebP (it returns PNG) | the canvas WebP fallback reports itself unavailable |
 | Firefox, WebKit on Linux | the premultiplied canvas never settles: semi-transparent pixels re-round on every pass | nothing (only the canvas fallback is affected, and it already declares inexact alpha) |
+| WebKit 27.2 on macOS (Playwright 1.64) | `createImageBitmap` with `premultiplyAlpha: 'none'` divides semi-transparent colour by alpha a second time | Airgap leaves `premultiplyAlpha` at its default (the canvas stores premultiplied colour either way), so HEIC and the canvas fallback decode correctly |
+| WebKit 27.2 (Playwright 1.64) | every `<select>` raises a `style-src-attr` CSP report for the engine's own rendering, with no page code involved | nothing (the e2e CSP recorder sets aside exactly that report, in WebKit only; a positive control shows a page-set style attribute is still caught) |
+| WebKit 27.2 on Linux | `ImageDecoder` frames carry colour that is already premultiplied, whatever `premultiplyAlpha` asks for | nothing (Airgap does not decode through `ImageDecoder`; the APNG cross-check compares against premultiplied colour there) |
 | Firefox | worker imports are checked against `worker-src` | the CSP allows `'self'` there (see above) |
 
 WebKit is not one target: the Linux port that CI runs uses libjpeg-turbo,
@@ -516,8 +519,11 @@ frame's compressed data goes through the same Rust PNG decoder as a still.
 Evidence: a fixture written by hand from the specification exercises every
 dispose and blend operation. The tests compare Airgap's frames against a
 model of the specification written out in the test, and against the APNG
-decoders of Chromium and Firefox through `ImageDecoder`. WebKit's
-`ImageDecoder` drops alpha, so that check is skipped there with the reason.
+decoders of Chromium, Firefox and WebKit on Linux through `ImageDecoder`.
+WebKit on Linux hands out premultiplied colour there, so its frames are
+compared against premultiplied colour; where an engine's `ImageDecoder` drops
+alpha (WebKit on macOS, older WebKit on Linux), the check is skipped with the
+reason.
 UPNG.js, a test-only dependency, re-reads Airgap's output in Node. It is not
 used as the oracle for the fixture, because it has two bugs, both pinned in
 `tests/unit/apng.test.ts`:
