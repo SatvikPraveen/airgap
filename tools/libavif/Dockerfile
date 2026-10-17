@@ -1,5 +1,5 @@
 # Reproducible single-threaded WebAssembly build of libavif + libaom for AVIF image sequences.
-FROM emscripten/emsdk:5.0.7
+FROM emscripten/emsdk:6.0.11
 RUN apt-get update && apt-get install -y --no-install-recommends git cmake ninja-build python3 perl && rm -rf /var/lib/apt/lists/*
 ARG AOM_TAG=v3.15.2
 ARG AVIF_TAG=v1.4.2
