@@ -12,7 +12,7 @@ import { convert, prepareSource } from '../../src/convert';
 import { inspect } from '../../src/inspect';
 import { extractMetadata } from '../../src/metadata/containers';
 import * as P from '../fixtures/pattern.mjs';
-import { firstMismatch, fixtureBytes, rasterFrom } from './helpers';
+import { ENGINE, IMAGEIO, firstMismatch, fixtureBytes, rasterFrom } from './helpers';
 
 const registry = new CodecRegistry();
 
@@ -261,6 +261,12 @@ describe('APNG through the real codecs and pipeline', () => {
     for (let i = 0; i < 4; i++) decoded.push(await pixelsOf(i)); // each frame once (Firefox refuses repeats)
     const band = (9 * 32 + 3) * 4 + 3;
     if (decoded[0]![band] !== 100) return ctx.skip('ImageDecoder frames lose alpha in this engine');
+    // WebKit on Linux (measured from WebKit 27.2, Playwright 1.64; earlier builds dropped alpha
+    // and skipped above) keeps alpha but hands out frames whose colour is already premultiplied,
+    // whatever premultiplyAlpha asks for, labelled as straight RGBA: drawImage then premultiplies
+    // it a second time. So there the frames are compared against premultiplied colour. Airgap
+    // itself never decodes through ImageDecoder, so only this cross-check is affected.
+    const premultipliedFrames = ENGINE === 'webkit' && !IMAGEIO;
     for (let i = 0; i < 4; i++) {
       const d = decoded[i]!;
       const o = ours.frames[i]!.pixels.data;
@@ -270,7 +276,10 @@ describe('APNG through the real codecs and pipeline', () => {
         expect(d[k + 3], `frame ${i} alpha @${k / 4}`).toBe(o[k + 3]);
         const a = o[k + 3]!;
         const tol = a === 255 ? 0 : a === 0 ? 255 : Math.ceil(255 / a);
-        for (let c2 = 0; c2 < 3; c2++) expect(Math.abs(d[k + c2]! - o[k + c2]!), `frame ${i} ch${c2} @${k / 4}`).toBeLessThanOrEqual(tol);
+        for (let c2 = 0; c2 < 3; c2++) {
+          const want = premultipliedFrames ? Math.round((o[k + c2]! * a) / 255) : o[k + c2]!;
+          expect(Math.abs(d[k + c2]! - want), `frame ${i} ch${c2} @${k / 4}${premultipliedFrames ? ' (premultiplied)' : ''}`).toBeLessThanOrEqual(tol);
+        }
       }
     }
   });

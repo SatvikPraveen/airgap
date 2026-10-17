@@ -9,6 +9,11 @@ test suites, which run in Chromium, Firefox and WebKit.
 - Documentation: contents list, badges and refreshed screenshots in the
   README (with a dark-mode variant); `CONTRIBUTING.md`, `SECURITY.md` and a
   pull-request template; the codec survey moved to `docs/codec-survey.md`.
+- Dependencies: Playwright 1.64 (WebKit 27.2), TypeScript 7, pako 3, Vite and
+  Vitest updates. WebKit 27.2 differences are measured and recorded in the
+  README's engine table; on macOS WebKit, `createImageBitmap` mishandles
+  `premultiplyAlpha: 'none'`, so the HEIC and canvas decoders no longer ask
+  for it.
 
 ## 0.3.0 (2026-10-11)
 
