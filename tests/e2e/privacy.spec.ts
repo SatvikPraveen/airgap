@@ -127,6 +127,20 @@ test('the CSP: connect-src none, worker-src blob and self only, wasm-unsafe-eval
   expect(csp).not.toContain('*');
 });
 
+test('positive control: a style attribute set by the page is still recorded as a CSP violation', async ({ page }) => {
+  await armCspRecorder(page);
+  await openApp(page);
+  const trap = await installNetworkTrap(page);
+  await page.evaluate(async () => {
+    const d = document.createElement('div');
+    document.body.append(d);
+    d.setAttribute('style', 'color: red');
+    await new Promise((r) => setTimeout(r, 200));
+    d.remove();
+  });
+  expect(await trap.cspViolations()).toContain('style-src-attr: inline');
+});
+
 test('positive control: the trap DOES catch a fetch, an image beacon and a websocket attempt', async ({ page }) => {
   await armCspRecorder(page);
   await openApp(page);

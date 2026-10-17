@@ -50,7 +50,10 @@ export async function decodeViaCanvas(bytes: Uint8Array, format: ImageFormat): P
   // the original bytes. Orientation is applied uniformly by the pipeline.
   const stripped = CONTAINER_METADATA.includes(format) && (header.metadata.hasExif || header.metadata.hasIcc || header.metadata.hasXmp) ? injectMetadata(bytes, format, {}) : bytes;
   const blob = new Blob([stripped as BlobPart], { type: MIME[format] });
-  const bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+  // premultiplyAlpha is left at its default: the canvas stores premultiplied colour either way, and
+  // WebKit 27.2 on macOS mishandles 'none' (semi-transparent colour comes back divided by alpha a
+  // second time; measured, tests/browser/canvas-codec.test.ts).
+  const bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none' });
   try {
     const { ctx } = makeCanvas(bitmap.width, bitmap.height);
     ctx.drawImage(bitmap, 0, 0);

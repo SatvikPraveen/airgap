@@ -250,13 +250,27 @@ export interface NetworkTrap {
  * without this recorder a leaky build could pass the request-count check.
  */
 export async function armCspRecorder(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const w = window as unknown as { __cspViolations: string[] };
+  const engine = page.context().browser()?.browserType().name() ?? '';
+  await page.addInitScript((engine: string) => {
+    const w = window as unknown as { __cspViolations: string[]; __cspEngineReports: string[] };
     w.__cspViolations = [];
+    w.__cspEngineReports = [];
     document.addEventListener('securitypolicyviolation', (e) => {
-      w.__cspViolations.push(`${e.violatedDirective}: ${e.blockedURI}`);
+      const line = `${e.violatedDirective}: ${e.blockedURI}`;
+      // WebKit 27.2 (Playwright 1.64; measured on Linux and macOS with a static <select> on a page
+      // with style-src 'self' and no script) reports a style-src-attr violation, with no sample,
+      // for every <select> it renders: its own control rendering, not anything the page does.
+      // Only that report (on a <select>, in WebKit) is set aside and kept in __cspEngineReports;
+      // any other directive, element or engine still fails the suite (a positive control in
+      // privacy.spec.ts checks a page-set style attribute is still caught).
+      const target = e.target as Element | null;
+      if (engine === 'webkit' && e.violatedDirective === 'style-src-attr' && e.blockedURI === 'inline' && !e.sample && target?.tagName === 'SELECT') {
+        w.__cspEngineReports.push(line);
+        return;
+      }
+      w.__cspViolations.push(line);
     });
-  });
+  }, engine);
 }
 
 /** A blob: URL created by this page's own origin (an in-memory object, not a network resource). */
