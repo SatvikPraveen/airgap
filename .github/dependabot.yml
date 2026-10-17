@@ -21,6 +21,12 @@ updates:
       - "/tools/libjxl"
     schedule:
       interval: monthly
+    # vendor/ holds the codecs built with this exact emsdk, and
+    # codecs-reproducible.yml checks a rebuild matches them byte for byte.
+    # A new emsdk changes the output, so it is upgraded by hand together with
+    # a vendor/ rebuild, never as a bare version bump.
+    ignore:
+      - dependency-name: "emscripten/emsdk"
     groups:
       docker-images:
         patterns: ["*"]
